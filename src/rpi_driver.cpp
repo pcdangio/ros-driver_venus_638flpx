@@ -88,9 +88,9 @@ void rpi_driver::deinitialize_serial()
         rpi_driver::m_pigpio_handle = -1;
     }
 }
-void rpi_driver::write_data(char* bytes, unsigned int length)
+void rpi_driver::write_data(const char* bytes, unsigned int length)
 {
-    int result = serial_write(rpi_driver::m_pigpio_handle, static_cast<unsigned int>(rpi_driver::m_serial_handle), bytes, length);
+    int result = serial_write(rpi_driver::m_pigpio_handle, static_cast<unsigned int>(rpi_driver::m_serial_handle), const_cast<char*>(bytes), length);
     if(result < 0)
     {
         switch(result)

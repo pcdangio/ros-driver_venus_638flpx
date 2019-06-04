@@ -64,82 +64,90 @@ void driver::find_device(std::string port)
     message << "find_device: Could not find device on port " << port << " at any of the expected baud rates.";
     throw std::runtime_error(message.str());
 }
-bool driver::write_message(message_id_types message_id, char *data, unsigned int n_bytes)
+
+bool driver::write_message(const message *msg)
 {
-    // Create a new buffer for the entire packet.
-    unsigned int packet_size = 8 + n_bytes;
-    char* packet = new char[packet_size];
-
-    // Populate packet.
-    unsigned int field = 0;
-    packet[field++] = static_cast<char>(0xA0);
-    packet[field++] = static_cast<char>(0xA1);
-    unsigned short payload_length = htobe16(n_bytes + 1); // Converts host to big endian.
-    packet[field++] = static_cast<char>(payload_length >> 8);
-    packet[field++] = static_cast<char>(payload_length & 0xFF);
-    packet[field++] = static_cast<char>(message_id);
-    // Populate remainder of payload and calculate checksum simultaneously.
-    char checksum = static_cast<char>(message_id);
-    for(unsigned int i = 0; i < n_bytes; i++)
-    {
-        packet[field++] = data[i];
-        checksum ^= data[i];
-    }
-    packet[field++] = checksum;
-    packet[field++] = static_cast<char>(0x0D); // CR
-    packet[field++] = static_cast<char>(0x0A); // LF
-
-    // Write packet to serial.
-    write_data(packet, packet_size);
-
-    // Delete packet.
-    delete [] packet;
+    write_data(msg->p_packet(), msg->p_packet_size());
 }
-void driver::read_message(message_id_types message_id, char *data, unsigned int n_bytes)
+driver::message* driver::read_message(unsigned int timeout_ms)
 {
     // Set up a timeout duration.
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
 
-    // Read bytes until requested message is found or a timeout occurs.
-    // Create empty packet for reading message into.
-    unsigned int packet_size = 8 + n_bytes;
-    char* packet = new char[packet_size];
-    for(unsigned int i = 0; i < packet_size; i++)
-    {
-        packet[i] = 0;
-    }
-    // Specify expected header, message id, and remaining bytes.
+    // Process is to look for header and payload size.  Use payload size + known non-payload size to create packet.
+    // Create new packet byte array, transferring in header and payload size.
+    // Read expected remaining bytes into packet.
+    // When packet complete, validate checksum.  If mismatch, reset to beginning of process.
+    // If timeout occurs anywhere in the process, quit out and return nullptr instead of exception.
+
+    // Specify expected header.
     const char header[2] = {static_cast<char>(0x0A), static_cast<char>(0xA1)};
-    const char id = static_cast<char>(message_id);
-    unsigned int remaining_bytes = packet_size - 5;
-    // Loop while message hasn't been completed.
-    bool message_found = false;
-    bool message_completed = false;
-    while(!message_completed)
+    // Create fifo for reading header and payload size.
+    char fifo[4] = {0, 0, 0, 0};
+    // Create packet for receiving message.
+    char* packet = nullptr;
+    unsigned int packet_size = 0;
+    // Create flag for if header has been found.
+    bool header_found = false;
+
+    // Loop forever; will kick out with either new message or timeout.
+    while(true)
     {
-        // If message hasn't been found, read one byte at a time.
-        if(!message_found && bytes_available() > 0)
+        // If packet is nullptr, header hasn't been found yet. Read one byte at a time.
+        if(!header_found && bytes_available() > 0)
         {
-            // Shift bytes to the left in the packet.
-            packet[0] = packet[1];
-            packet[1] = packet[2];
-            packet[2] = packet[3];
-            packet[3] = packet[4];
+            // Shift bytes to the left in the fifo.
+            std::memcpy(&fifo[0], &fifo[1], 3);
 
-            // Read new byte into packet.
-            read_data(&packet[4], 1);
+            // Read new byte into the end of the fifo.
+            read_data(&fifo[3], 1);
 
-            // Check if header and message match.
-            if(packet[0] == header[0] && packet[1] == header[1] && packet[4] == id)
+            // Check if header matches
+            if(fifo[0] == header[0] && fifo[1] == header[1])
             {
-                message_found = true;
+                // Mark that the header was found.
+                header_found = true;
+                // Interpret the payload length with endianness.
+                unsigned short payload_length = be16toh(*reinterpret_cast<unsigned short*>(&fifo[2]));
+                // Calculate packet size.
+                packet_size = payload_length + 7;
+                // Instantiate a new packet for receiving the message.
+                packet = new char[packet_size];
+                // Copy the header and payload length from the fifo into the buffer.
+                std::memcpy(&packet[0], &fifo[0], 4);
             }
         }
-        // If message has been found, block read the rest of the bytes if remaining_bytes is available.
-        else if(message_found && bytes_available() >= remaining_bytes)
+        // If header has been found, block read the rest of the bytes if available.
+        else if(header_found && bytes_available() >= packet_size - 4)
         {
-            read_data(&packet[5], remaining_bytes);
-            message_completed = true;
+            // Read the rest of the bytes.
+            read_data(&packet[4], packet_size - 4);
+
+            // Create an output message.
+            driver::message* msg = new driver::message(packet, packet_size);
+
+            // Delete packet.
+            delete [] packet;
+
+            // Validate the checksum.
+            if(msg->validate_checksum())
+            {
+                return msg;
+            }
+            else
+            {
+                // Invalid checksum.  Delete message and reset to header search stage.
+                delete msg;
+                // Reset fifo.
+                for(unsigned int i = 0; i < 4; i++)
+                {
+                    fifo[i] = 0;
+                }
+                // Reset header found and packet size.
+                header_found = false;
+                packet_size = 0;
+                // Packet has already been cleaned up.
+            }
         }
         // If neither of the above cases occurs, we must wait for more bytes.
         else
@@ -147,40 +155,17 @@ void driver::read_message(message_id_types message_id, char *data, unsigned int 
             usleep(500);
         }
 
-        // Check if timeout elapsed.  This allows for timeout when no bytes are available, or plenty of bytes are available but none match the requested message.
+        // Check if timeout elapsed.  This allows for timeout when no bytes are available, or plenty of bytes are available but none produce a valid message.
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time);
-        if(elapsed.count() > driver::m_serial_timeout)
+        if(elapsed.count() > timeout_ms)
         {
-            // Clean up packet.
+            // Clean up packet if it exists (can occur between two states above).
             delete [] packet;
-            // Throw error.
-            throw std::runtime_error("read_message: Timed out during read.");
+            // Return nullptr.
+            return nullptr;
         }
     }
-
-    // If this point is reached, the message has been read before the timeout. Move data bytes into output array and calculate checksum.
-
-    // Next bytes are the data bytes.  Read bytes and calculate checksum.
-    char checksum = id;
-    unsigned int field = 5; // data bytes start at index 5 in the packet.
-    for(unsigned int i = 0; i < n_bytes; i++)
-    {
-        data[i] = packet[field++];
-        checksum ^= data[i];
-    }
-    // Validate checksum match.
-    if(checksum != packet[field])
-    {
-        // Clean up packet.
-        delete [] packet;
-        // Throw error.
-        throw std::runtime_error("read_message: Checksum mismatch.");
-    }
-
-    // Clean up packet.
-    delete [] packet;
 }
-
 
 
 // MESSAGE
@@ -213,7 +198,7 @@ driver::message::message(message_id_types message_id, unsigned int data_size)
     driver::message::m_packet[index++] = static_cast<char>(0x0D);
     driver::message::m_packet[index++] = static_cast<char>(0x0A);
 }
-driver::message::message(char* packet, unsigned int packet_size)
+driver::message::message(const char *packet, unsigned int packet_size)
 {
     // Create packet byte array and store size.
     driver::message::m_packet_size = packet_size;
@@ -296,23 +281,23 @@ void driver::message::write_field(unsigned int address, unsigned int size, void 
 }
 
 template<typename T>
-T driver::message::read_field(unsigned int address)
+T driver::message::read_field(unsigned int address) const
 {
     T output;
     driver::message::read_field(address, sizeof(T), static_cast<void*>(&output));
     return output;
 }
 // Add allowable data types.
-template unsigned char driver::message::read_field<unsigned char>(unsigned int address);
-template char driver::message::read_field<char>(unsigned int address);
-template unsigned short driver::message::read_field<unsigned short>(unsigned int address);
-template short driver::message::read_field<short>(unsigned int address);
-template unsigned int driver::message::read_field<unsigned int>(unsigned int address);
-template int driver::message::read_field<int>(unsigned int address);
-template float driver::message::read_field<float>(unsigned int address);
-template double driver::message::read_field<double>(unsigned int address);
+template unsigned char driver::message::read_field<unsigned char>(unsigned int address) const;
+template char driver::message::read_field<char>(unsigned int address) const;
+template unsigned short driver::message::read_field<unsigned short>(unsigned int address) const;
+template short driver::message::read_field<short>(unsigned int address) const;
+template unsigned int driver::message::read_field<unsigned int>(unsigned int address) const;
+template int driver::message::read_field<int>(unsigned int address) const;
+template float driver::message::read_field<float>(unsigned int address) const;
+template double driver::message::read_field<double>(unsigned int address) const;
 
-void driver::message::read_field(unsigned int address, unsigned int size, void *field)
+void driver::message::read_field(unsigned int address, unsigned int size, void *field) const
 {
     // Address is 0 based in the data portion of the packet.
     unsigned int packet_address = 5 + address;
@@ -335,34 +320,25 @@ void driver::message::read_field(unsigned int address, unsigned int size, void *
     case 2:
     {
         // Extract big endian value from packet.
-        unsigned short value;
-        std::memcpy(&value, &driver::message::m_packet[packet_address], 2);
-        // Convert to host endianness.
-        value = be16toh(value);
+        unsigned short value = be16toh(*reinterpret_cast<unsigned short*>(&driver::message::m_packet[packet_address]));
         // Copy value into output field.
-        std::memcpy(field, &value, 2);
+        std::memcpy(field, &value, sizeof(value));
         break;
     }
     case 4:
     {
         // Extract big endian value from packet.
-        unsigned int value;
-        std::memcpy(&value, &driver::message::m_packet[packet_address], 4);
-        // Convert to host endianness.
-        value = be32toh(value);
+        unsigned int value = be32toh(*reinterpret_cast<unsigned int*>(&driver::message::m_packet[packet_address]));
         // Copy value into output field.
-        std::memcpy(field, &value, 4);
+        std::memcpy(field, &value, sizeof(value));
         break;
     }
     case 8:
     {
         // Extract big endian value from packet.
-        unsigned long value;
-        std::memcpy(&value, &driver::message::m_packet[packet_address], 8);
-        // Convert to host endianness.
-        value = be64toh(value);
+        unsigned long value = be64toh(*reinterpret_cast<unsigned long*>(&driver::message::m_packet[packet_address]));
         // Copy value into output field.
-        std::memcpy(field, &value, 8);
+        std::memcpy(field, &value, sizeof(value));
         break;
     }
     default:
@@ -387,21 +363,21 @@ void driver::message::write_checksum()
 {
     driver::message::m_packet[driver::message::m_packet_size - 3] = driver::message::calculate_checksum();
 }
-bool driver::message::validate_checksum()
+bool driver::message::validate_checksum() const
 {
     return driver::message::calculate_checksum() == driver::message::m_packet[driver::message::m_packet_size - 3];
 }
 
-unsigned int driver::message::p_packet_size()
+unsigned int driver::message::p_packet_size() const
 {
     return driver::message::m_packet_size;
 }
-const char* driver::message::p_packet()
+const char* driver::message::p_packet() const
 {
     return driver::message::m_packet;
 }
 
-driver::message::message_id_types driver::message::p_message_id()
+driver::message::message_id_types driver::message::p_message_id() const
 {
     return static_cast<driver::message::message_id_types>(driver::message::m_packet[4]);
 }
