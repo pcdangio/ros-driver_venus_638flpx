@@ -5,6 +5,7 @@ CONFIG -= qt
 
 SOURCES += \
     src/driver.cpp \
+    src/ros_node.cpp \
     src/rpi_driver.cpp
 
 INCLUDEPATH += \
@@ -12,4 +13,5 @@ INCLUDEPATH += \
 
 HEADERS += \
     src/driver.h \
+    src/ros_node.h \
     src/rpi_driver.h
