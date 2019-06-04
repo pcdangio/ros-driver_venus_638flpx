@@ -69,7 +69,7 @@ private:
         char* m_packet;
         unsigned int m_packet_size;
 
-        char calculate_checksum();
+        char calculate_checksum() const;
         void write_checksum();
         void write_field(unsigned int address, unsigned int size, void* field);
         void read_field(unsigned int address, unsigned int size, void* field) const;

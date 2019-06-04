@@ -361,7 +361,7 @@ void driver::message::read_field(unsigned int address, unsigned int size, void *
     }
 }
 
-char driver::message::calculate_checksum()
+char driver::message::calculate_checksum() const
 {
     char checksum = 0;
     for(unsigned int i = 4; i < driver::message::m_packet_size - 3; i++)
