@@ -10,7 +10,7 @@ public:
     driver();
     virtual ~driver();
 
-    void initialize(std::string port, unsigned int baud);
+    void initialize(std::string port);
     void deinitialize();
 
     void spin();
@@ -25,16 +25,32 @@ protected:
 private:
     enum class message_id_types
     {
-        RESTART = 0x01,
-        FACTORY_RESET = 0x02,
+        QUERY_VERSION = 0x02,
+        FACTORY_RESET = 0x04,
         CONFIG_SERIAL = 0x05,
-        CONFIG_RATE = 0x0E
+        CONFIG_RATE = 0x0E,
+        RESPONSE_VERSION = 0x80,
+        RESPONSE_ACK = 0x83,
+        RESPONSE_NAK = 0x84
     };
 
+    enum class nmea_types
+    {
+        GGA = 0,
+        GLL = 1,
+        GSA = 2,
+        GSV = 3,
+        RMC = 4,
+        VTG = 5
+    };
+
+    const unsigned int m_serial_timeout = 10;
     std::function<void()> m_data_callback;
 
-    void write_message(message_id_types message_id, unsigned char* data, unsigned int n_bytes);
-    unsigned int find_baudrate();
+    bool write_message(message_id_types message_id, char* data, unsigned int n_bytes);
+    void read_message(message_id_types message_id, char* data, unsigned int n_bytes);
+    void read_nmea(nmea_types nmea);
+    void find_device(std::string port);
 };
 
 #endif // DRIVER_H
