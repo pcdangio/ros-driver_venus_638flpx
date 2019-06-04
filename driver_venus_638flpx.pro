@@ -5,6 +5,7 @@ CONFIG -= qt
 
 SOURCES += \
     src/driver.cpp \
+    src/main_rpi.cpp \
     src/ros_node.cpp \
     src/rpi_driver.cpp
 
@@ -15,3 +16,7 @@ HEADERS += \
     src/driver.h \
     src/ros_node.h \
     src/rpi_driver.h
+
+DISTFILES += \
+    CMakeLists.txt \
+    package.xml
