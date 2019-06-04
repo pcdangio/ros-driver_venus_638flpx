@@ -186,16 +186,16 @@ driver::message::message(id_types message_id, unsigned int data_size)
     driver::message::m_packet_size = 8 + data_size;
     driver::message::m_packet = new char[driver::message::m_packet_size];
 
-    // Calculate payload length.
-    unsigned short payload_length = static_cast<unsigned short>(data_size + 1);
+    // Calculate payload length and place in big endian format.
+    unsigned short payload_length = htobe16(static_cast<unsigned short>(data_size + 1));
 
     // Set appropriate fields.
     unsigned int index = 0;
     // Set header.
     driver::message::m_packet[index++] = static_cast<char>(0xA0);
     driver::message::m_packet[index++] = static_cast<char>(0xA1);
-    // Write payload length field.
-    driver::message::write_field<unsigned short>(index, payload_length);
+    // Write payload length field
+    std::memcpy(&driver::message::m_packet[index], &payload_length, 2); index += 2;
     // Write message id.
     driver::message::m_packet[index++] = static_cast<char>(message_id);
     // Write zeros to the data field.
@@ -204,10 +204,10 @@ driver::message::message(id_types message_id, unsigned int data_size)
         driver::message::m_packet[index++] = 0;
     }
     // Write the checksum.
-    driver::message::write_checksum(index);
+    driver::message::write_checksum(); index++;
     // Write CRLF footer.
     driver::message::m_packet[index++] = static_cast<char>(0x0D);
-    driver::message::m_packet[index++] = static_cast<char>(0x0A);
+    driver::message::m_packet[index] = static_cast<char>(0x0A);
 }
 driver::message::message(const char *packet, unsigned int packet_size)
 {
