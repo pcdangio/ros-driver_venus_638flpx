@@ -3,6 +3,7 @@
 #include <sstream>
 #include <chrono>
 #include <unistd.h>
+#include <cstring>
 
 driver::driver()
 {
@@ -178,4 +179,229 @@ void driver::read_message(message_id_types message_id, char *data, unsigned int 
 
     // Clean up packet.
     delete [] packet;
+}
+
+
+
+// MESSAGE
+driver::message::message(message_id_types message_id, unsigned int data_size)
+{
+    // Create an packet with empty data bytes.
+    driver::message::m_packet_size = 8 + data_size;
+    driver::message::m_packet = new char[driver::message::m_packet_size];
+
+    // Calculate payload length.
+    unsigned short payload_length = static_cast<unsigned short>(data_size + 1);
+
+    // Set appropriate fields.
+    unsigned int index = 0;
+    // Set header.
+    driver::message::m_packet[index++] = static_cast<char>(0xA0);
+    driver::message::m_packet[index++] = static_cast<char>(0xA1);
+    // Write payload length field.
+    driver::message::write_field<unsigned short>(index, payload_length);
+    // Write message id.
+    driver::message::m_packet[index++] = static_cast<char>(message_id);
+    // Write zeros to the data field.
+    for(unsigned int i = 0; i < data_size; i++)
+    {
+        driver::message::m_packet[index++] = 0;
+    }
+    // Write the checksum.
+    driver::message::write_checksum(index);
+    // Write CRLF footer.
+    driver::message::m_packet[index++] = static_cast<char>(0x0D);
+    driver::message::m_packet[index++] = static_cast<char>(0x0A);
+}
+driver::message::message(char* packet, unsigned int packet_size)
+{
+    // Create packet byte array and store size.
+    driver::message::m_packet_size = packet_size;
+    driver::message::m_packet = new char[packet_size];
+
+    // Deep copy packet.
+    for(unsigned int i = 0; i < packet_size; i++)
+    {
+        driver::message::m_packet[i] = packet[i];
+    }
+}
+driver::message::~message()
+{
+    // Delete packet.
+    delete [] driver::message::m_packet;
+}
+
+template<typename T>
+void driver::message::write_field(unsigned int address, T field)
+{
+    driver::message::write_field(address, sizeof(field), static_cast<void*>(&field));
+}
+// Add allowable data types.
+template void driver::message::write_field<unsigned char>(unsigned int address, unsigned char field);
+template void driver::message::write_field<char>(unsigned int address, char field);
+template void driver::message::write_field<unsigned short>(unsigned int address, unsigned short field);
+template void driver::message::write_field<short>(unsigned int address, short field);
+template void driver::message::write_field<unsigned int>(unsigned int address, unsigned int field);
+template void driver::message::write_field<int>(unsigned int address, int field);
+template void driver::message::write_field<float>(unsigned int address, float field);
+template void driver::message::write_field<double>(unsigned int address, double field);
+
+void driver::message::write_field(unsigned int address, unsigned int size, void *field)
+{
+    // Address is 0 based in the data portion of the packet.
+    unsigned int packet_address = 5 + address;
+
+    // Verify that field will fit in packet.
+    if(packet_address + size > driver::message::m_packet_size - 3)
+    {
+        throw std::runtime_error("write_field: Not enough room in packet data");
+    }
+
+    // Populate based on size.
+    switch(size)
+    {
+    case 1:
+    {
+        driver::message::m_packet[packet_address] = *static_cast<char*>(field);
+        break;
+    }
+    case 2:
+    {
+        unsigned short value = htobe16(*static_cast<unsigned short*>(field));
+        std::memcpy(&driver::message::m_packet[packet_address], &value, 2);
+        break;
+    }
+    case 4:
+    {
+        unsigned int value = htobe32(*static_cast<unsigned int*>(field));
+        std::memcpy(&driver::message::m_packet[packet_address], &value, 4);
+        break;
+    }
+    case 8:
+    {
+        unsigned long value = htobe64(*static_cast<unsigned long*>(field));
+        std::memcpy(&driver::message::m_packet[packet_address], &value, 8);
+        break;
+    }
+    default:
+    {
+        std::stringstream message;
+        message << "write_field: Invalid data size (" << size << " bytes)";
+        throw std::runtime_error(message.str());
+    }
+    }
+
+    // Update the checksum.
+    driver::message::write_checksum();
+}
+
+template<typename T>
+T driver::message::read_field(unsigned int address)
+{
+    T output;
+    driver::message::read_field(address, sizeof(T), static_cast<void*>(&output));
+    return output;
+}
+// Add allowable data types.
+template unsigned char driver::message::read_field<unsigned char>(unsigned int address);
+template char driver::message::read_field<char>(unsigned int address);
+template unsigned short driver::message::read_field<unsigned short>(unsigned int address);
+template short driver::message::read_field<short>(unsigned int address);
+template unsigned int driver::message::read_field<unsigned int>(unsigned int address);
+template int driver::message::read_field<int>(unsigned int address);
+template float driver::message::read_field<float>(unsigned int address);
+template double driver::message::read_field<double>(unsigned int address);
+
+void driver::message::read_field(unsigned int address, unsigned int size, void *field)
+{
+    // Address is 0 based in the data portion of the packet.
+    unsigned int packet_address = 5 + address;
+
+    // Verify that field can actually be extracted.
+    // Address is zero based within the data section of the packet.
+    if(packet_address + size > driver::message::m_packet_size - 3)
+    {
+        throw std::runtime_error("read_field: Invalid field size/address.");
+    }
+
+    // Read based on size.
+    switch(size)
+    {
+    case 1:
+    {
+        *static_cast<unsigned char*>(field) = static_cast<unsigned char>(driver::message::m_packet[packet_address]);
+        break;
+    }
+    case 2:
+    {
+        // Extract big endian value from packet.
+        unsigned short value;
+        std::memcpy(&value, &driver::message::m_packet[packet_address], 2);
+        // Convert to host endianness.
+        value = be16toh(value);
+        // Copy value into output field.
+        std::memcpy(field, &value, 2);
+        break;
+    }
+    case 4:
+    {
+        // Extract big endian value from packet.
+        unsigned int value;
+        std::memcpy(&value, &driver::message::m_packet[packet_address], 4);
+        // Convert to host endianness.
+        value = be32toh(value);
+        // Copy value into output field.
+        std::memcpy(field, &value, 4);
+        break;
+    }
+    case 8:
+    {
+        // Extract big endian value from packet.
+        unsigned long value;
+        std::memcpy(&value, &driver::message::m_packet[packet_address], 8);
+        // Convert to host endianness.
+        value = be64toh(value);
+        // Copy value into output field.
+        std::memcpy(field, &value, 8);
+        break;
+    }
+    default:
+    {
+        std::stringstream message;
+        message << "write_field: Invalid data size (" << size << " bytes)";
+        throw std::runtime_error(message.str());
+    }
+    }
+}
+
+char driver::message::calculate_checksum()
+{
+    char checksum = 0;
+    for(unsigned int i = 4; i < driver::message::m_packet_size - 3; i++)
+    {
+        checksum ^= driver::message::m_packet[i];
+    }
+    return checksum;
+}
+void driver::message::write_checksum()
+{
+    driver::message::m_packet[driver::message::m_packet_size - 3] = driver::message::calculate_checksum();
+}
+bool driver::message::validate_checksum()
+{
+    return driver::message::calculate_checksum() == driver::message::m_packet[driver::message::m_packet_size - 3];
+}
+
+unsigned int driver::message::p_packet_size()
+{
+    return driver::message::m_packet_size;
+}
+const char* driver::message::p_packet()
+{
+    return driver::message::m_packet;
+}
+
+driver::message::message_id_types driver::message::p_message_id()
+{
+    return static_cast<driver::message::message_id_types>(driver::message::m_packet[4]);
 }
