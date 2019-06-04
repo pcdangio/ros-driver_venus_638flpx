@@ -38,18 +38,16 @@ private:
     class message
     {
     public:
-        enum class message_id_types
+        enum class id_types
         {
-            QUERY_VERSION = 0x02,
-            FACTORY_RESET = 0x04,
             CONFIG_SERIAL = 0x05,
+            CONFIG_POWER = 0x0C,
             CONFIG_RATE = 0x0E,
-            RESPONSE_VERSION = 0x80,
             RESPONSE_ACK = 0x83,
             RESPONSE_NAK = 0x84
         };
 
-        message(message_id_types message_id, unsigned int data_size);
+        message(id_types message_id, unsigned int data_size);
         message(const char* packet, unsigned int packet_size);
         ~message();
 
@@ -65,7 +63,7 @@ private:
         unsigned int p_packet_size() const;
         const char* p_packet() const;
 
-        message_id_types p_message_id() const;
+        id_types p_message_id() const;
 
     private:
         char* m_packet;
@@ -83,7 +81,7 @@ private:
     message* read_message(unsigned int timeout_ms = 10);
 
     void read_nmea(nmea_types nmea);
-    void find_device(std::string port);
+    void connect(std::string port);
 };
 
 #endif // DRIVER_H

@@ -17,7 +17,7 @@ driver::~driver()
 void driver::initialize(std::string port)
 {
     // Find and connect to the device.
-    driver::find_device(port);
+    driver::connect(port);
 
 }
 void driver::deinitialize()
@@ -31,7 +31,7 @@ void driver::spin()
 
 }
 
-void driver::find_device(std::string port)
+void driver::connect(std::string port)
 {
     // Loop through known baud rates to check for a valid return.
     // Use expected order to reduce search time.
@@ -42,19 +42,18 @@ void driver::find_device(std::string port)
         // Initialize the serial connection.
         initialize_serial(port, bauds[b]);
 
-        // Query the software version.
-        char query_data[1] = {0x01};
-        driver::write_message(driver::message_id_types::QUERY_VERSION, query_data, 1);
-        try
+        // Attempt to set the power to normal mode and listen for ACK.
+        // Can use empty fields since 0x0000 = normal mode written to SRAM.
+        driver::message cmd(driver::message::id_types::CONFIG_POWER, 2);
+        bool ack = driver::write_message(&cmd);
+        if(ack)
         {
-            char response_data[13];
-            driver::read_message(driver::message_id_types::RESPONSE_VERSION, response_data, 13);
             // Leave serial initialized and immediately return.
             return;
         }
-        catch (...)
+        else
         {
-            // Read failed on this baud rate. Deinitialize serial and continue search.
+            // Communication failed on this baud rate. Deinitialize serial and continue search.
             deinitialize_serial();
         }
     }
@@ -68,6 +67,18 @@ void driver::find_device(std::string port)
 bool driver::write_message(const message *msg)
 {
     write_data(msg->p_packet(), msg->p_packet_size());
+
+    // Receive ACK or NAK.
+    driver::message* ack_nak = driver::read_message();
+    if(ack_nak)
+    {
+        return ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK;
+    }
+    else
+    {
+        // Timed out.
+        return false;
+    }
 }
 driver::message* driver::read_message(unsigned int timeout_ms)
 {
@@ -169,7 +180,7 @@ driver::message* driver::read_message(unsigned int timeout_ms)
 
 
 // MESSAGE
-driver::message::message(message_id_types message_id, unsigned int data_size)
+driver::message::message(id_types message_id, unsigned int data_size)
 {
     // Create an packet with empty data bytes.
     driver::message::m_packet_size = 8 + data_size;
@@ -377,7 +388,7 @@ const char* driver::message::p_packet() const
     return driver::message::m_packet;
 }
 
-driver::message::message_id_types driver::message::p_message_id() const
+driver::message::id_types driver::message::p_message_id() const
 {
-    return static_cast<driver::message::message_id_types>(driver::message::m_packet[4]);
+    return static_cast<driver::message::id_types>(driver::message::m_packet[4]);
 }
