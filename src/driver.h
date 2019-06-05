@@ -78,7 +78,7 @@ private:
     std::function<void()> m_data_callback;
 
     bool write_message(const message* msg);
-    message* read_message(unsigned int timeout_ms = 10);
+    message* read_message(unsigned int timeout_ms = 100);
 
     void read_nmea(nmea_types nmea);
     void connect(std::string port);
