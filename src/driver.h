@@ -7,6 +7,18 @@
 class driver
 {
 public:
+    struct gga_message
+    {
+        double utc_time;
+        double latitude;
+        double longitude;
+        unsigned char quality_indicator;
+        unsigned char n_satellites;
+        float hdop;
+        float altitude;
+        int dgps_station;
+    };
+
     driver();
     virtual ~driver();
 
@@ -28,12 +40,12 @@ private:
 
     enum class nmea_types
     {
-        GGA = 0,
-        GLL = 1,
-        GSA = 2,
-        GSV = 3,
-        RMC = 4,
-        VTG = 5
+        GGA = 68,
+        GLL = 49,
+        GSA = 61,
+        GSV = 45,
+        RMC = 67,
+        VTG = 31
     };
 
     class message
@@ -76,12 +88,16 @@ private:
         void read_field(unsigned int address, unsigned int size, void* field) const;
     };
 
+
+
     std::function<void()> m_data_callback;
 
     bool write_message(const message& msg);
     message* read_message(unsigned int timeout_ms = 100);
 
-    void read_nmea(nmea_types nmea);
+    void read_nmea(unsigned int timeout_ms = 50);
+    gga_message parse_gga(char* nmea_string, unsigned int length);
+
     unsigned int connect(std::string port);
 };
 

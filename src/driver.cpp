@@ -19,7 +19,7 @@ void driver::initialize(std::string port)
     // Find and connect to the device.
     unsigned int baud = driver::connect(port);
 
-    // Check if the serial port needs to be changed.
+    // Check if the baud rate needs to be changed (should be 115200).
     if(baud != 115200)
     {
         driver::message msg(driver::message::id_types::CONFIG_SERIAL, 3);
@@ -203,6 +203,105 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     }
 }
 
+void driver::read_nmea(unsigned int timeout_ms)
+{
+    // Attempt to read a single NMEA message with timeout.
+
+    // Set up a timeout duration.
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
+
+    // Process is to look for $GP .  Use payload size + known non-payload size to create packet.
+    // Create new packet byte array, transferring in header and payload size.
+    // Read expected remaining bytes into packet.
+    // When packet complete, validate checksum.  If mismatch, reset to beginning of process.
+    // If timeout occurs anywhere in the process, quit out and return nullptr instead of exception.
+
+    // Specify expected header.
+    const char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
+    // Create fifo for reading header and payload size.
+    char fifo[4] = {0, 0, 0, 0};
+    // Create packet for receiving message.
+    char* packet = nullptr;
+    unsigned int packet_size = 0;
+    // Create flag for if header has been found.
+    bool header_found = false;
+
+    // Loop forever; will kick out with either new message or timeout.
+    while(true)
+    {
+        // If packet is nullptr, header hasn't been found yet. Read one byte at a time.
+        if(!header_found && bytes_available() > 0)
+        {
+            // Shift bytes to the left in the fifo.
+            std::memcpy(&fifo[0], &fifo[1], 3);
+
+            // Read new byte into the end of the fifo.
+            read_data(&fifo[3], 1);
+
+            // Check if header matches
+            if(fifo[0] == header[0] && fifo[1] == header[1])
+            {
+                // Mark that the header was found.
+                header_found = true;
+                // Interpret the payload length with endianness.
+                unsigned short payload_length = be16toh(*reinterpret_cast<unsigned short*>(&fifo[2]));
+                // Calculate packet size.
+                packet_size = payload_length + 7;
+                // Instantiate a new packet for receiving the message.
+                packet = new char[packet_size];
+                // Copy the header and payload length from the fifo into the buffer.
+                std::memcpy(&packet[0], &fifo[0], 4);
+            }
+        }
+        // If header has been found, block read the rest of the bytes if available.
+        else if(header_found && bytes_available() >= packet_size - 4)
+        {
+            // Read the rest of the bytes.
+            read_data(&packet[4], packet_size - 4);
+
+            // Create an output message.
+            driver::message* msg = new driver::message(packet, packet_size);
+
+            // Delete packet.
+            delete [] packet;
+
+            // Validate the checksum.
+            if(msg->validate_checksum())
+            {
+                return msg;
+            }
+            else
+            {
+                // Invalid checksum.  Delete message and reset to header search stage.
+                delete msg;
+                // Reset fifo.
+                for(unsigned int i = 0; i < 4; i++)
+                {
+                    fifo[i] = 0;
+                }
+                // Reset header found and packet size.
+                header_found = false;
+                packet_size = 0;
+                // Packet has already been cleaned up.
+            }
+        }
+        // If neither of the above cases occurs, we must wait for more bytes.
+        else
+        {
+            usleep(500);
+        }
+
+        // Check if timeout elapsed.  This allows for timeout when no bytes are available, or plenty of bytes are available but none produce a valid message.
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time);
+        if(elapsed.count() > timeout_ms)
+        {
+            // Clean up packet if it exists (can occur between two states above).
+            delete [] packet;
+            // Return nullptr.
+            return nullptr;
+        }
+    }
+}
 
 // MESSAGE
 driver::message::message(id_types message_id, unsigned int data_size)
