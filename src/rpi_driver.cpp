@@ -182,7 +182,10 @@ void rpi_driver::flush_rx()
 {
     // Read out all available bytes.
     unsigned int available = rpi_driver::bytes_available();
-    char* bytes = new char[available];
-    rpi_driver::read_data(bytes, available);
-    delete [] bytes;
+    if(available)
+    {
+        char* bytes = new char[available];
+        rpi_driver::read_data(bytes, available);
+        delete [] bytes;
+    }
 }
