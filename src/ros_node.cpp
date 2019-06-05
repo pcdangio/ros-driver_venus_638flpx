@@ -42,8 +42,12 @@ ros_node::~ros_node()
 
 void ros_node::spin()
 {
-    // Spin.
-    ros::spin();
+    while(ros::ok())
+    {
+        ros_node::m_driver->spin();
+
+        ros::spinOnce();
+    }
 
     // Deinitialize driver.
     ros_node::deinitialize_driver();

@@ -4,10 +4,17 @@
 #include <chrono>
 #include <unistd.h>
 #include <cstring>
+#include <iomanip>
 
 driver::driver()
 {
-
+    // Initialize the map of NMEA types and lengths.
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GGA", 70));
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GLL", 51));
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GSA", 63));
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GSV", 47));
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("RMC", 69));
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("VTG", 33));
 }
 driver::~driver()
 {
@@ -49,7 +56,7 @@ void driver::deinitialize()
 
 void driver::spin()
 {
-
+    driver::read_nmea();
 }
 
 unsigned int driver::connect(std::string port)
@@ -203,6 +210,7 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     }
 }
 
+#include <iostream>
 void driver::read_nmea(unsigned int timeout_ms)
 {
     // Attempt to read a single NMEA message with timeout.
@@ -210,80 +218,84 @@ void driver::read_nmea(unsigned int timeout_ms)
     // Set up a timeout duration.
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
 
-    // Process is to look for $GP .  Use payload size + known non-payload size to create packet.
-    // Create new packet byte array, transferring in header and payload size.
+    // Process is to look for $GP delimters, and then read message type to infer packet size.
+    // Create new packet byte array, transferring in delimiter and message type.
     // Read expected remaining bytes into packet.
-    // When packet complete, validate checksum.  If mismatch, reset to beginning of process.
+    // When packet complete, validate checksum.  If mismatch, quit.
     // If timeout occurs anywhere in the process, quit out and return nullptr instead of exception.
 
-    // Specify expected header.
-    const char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
-    // Create fifo for reading header and payload size.
-    char fifo[4] = {0, 0, 0, 0};
+    // Specify expected delimiter.
+    const char delimiter[3] = {'$', 'G', 'P'};
+    // Create fifo for reading delimiter and message type.
+    char fifo[6] = {0, 0, 0, 0, 0, 0};
     // Create packet for receiving message.
     char* packet = nullptr;
     unsigned int packet_size = 0;
-    // Create flag for if header has been found.
-    bool header_found = false;
+    // Create flag for if delimeter has been found.
+    bool delimiter_found = false;
 
-    // Loop forever; will kick out with either new message or timeout.
+    // Loop forever; will kick out with either new message, bad checksum, or timeout.
     while(true)
     {
         // If packet is nullptr, header hasn't been found yet. Read one byte at a time.
-        if(!header_found && bytes_available() > 0)
+        if(!delimiter_found && bytes_available() > 0)
         {
             // Shift bytes to the left in the fifo.
-            std::memcpy(&fifo[0], &fifo[1], 3);
+            std::memcpy(&fifo[0], &fifo[1], 5);
 
             // Read new byte into the end of the fifo.
-            read_data(&fifo[3], 1);
+            read_data(&fifo[5], 1);
 
-            // Check if header matches
-            if(fifo[0] == header[0] && fifo[1] == header[1])
+            // Check if delimiter matches
+            if(fifo[0] == delimiter[0] && fifo[1] == delimiter[1] && fifo[2] == delimiter[2])
             {
-                // Mark that the header was found.
-                header_found = true;
-                // Interpret the payload length with endianness.
-                unsigned short payload_length = be16toh(*reinterpret_cast<unsigned short*>(&fifo[2]));
-                // Calculate packet size.
-                packet_size = payload_length + 7;
+                // Mark that the delimiter was found.
+                delimiter_found = true;
+                // Read the message type.
+                std::string message_type(&fifo[3], 3);
+                // Check that the message type is valid.
+                if(driver::m_nmea_types.count(message_type) == 0)
+                {
+                    // Unknown message type, quit.
+                    return;
+                }
+                // Get the message length from the map.
+                unsigned short packet_size = driver::m_nmea_types.at(message_type);
                 // Instantiate a new packet for receiving the message.
                 packet = new char[packet_size];
                 // Copy the header and payload length from the fifo into the buffer.
-                std::memcpy(&packet[0], &fifo[0], 4);
+                std::memcpy(&packet[0], &fifo[0], 6);
             }
         }
         // If header has been found, block read the rest of the bytes if available.
-        else if(header_found && bytes_available() >= packet_size - 4)
+        else if(delimiter_found && bytes_available() >= packet_size - 6)
         {
             // Read the rest of the bytes.
-            read_data(&packet[4], packet_size - 4);
+            read_data(&packet[6], packet_size - 6);
 
-            // Create an output message.
-            driver::message* msg = new driver::message(packet, packet_size);
+            // Validate the checksum.
+            // First calculate checksum.
+            char checksum = 0;
+            for(unsigned int i = 1; i < packet_size - 5; i++)
+            {
+                checksum ^= packet[i];
+            }
+            // Convert checksum to 2 digit hex char array.
+            std::stringstream checksum_hex;
+            checksum_hex << std::setfill('0') << std::setw(2) << std::hex << checksum;
+            const char* checksum_array = checksum_hex.str().c_str();
+            if(checksum_array[0] != packet[packet_size - 4] || checksum_array[1] != packet[packet_size - 3])
+            {
+                // Checksum mistmatch, quit.
+                return;
+            }
+
+            // Call the appropriate message parser/signaler
+            std::string test_output(packet, packet_size);
+            std::cout << test_output << std::endl;
 
             // Delete packet.
             delete [] packet;
-
-            // Validate the checksum.
-            if(msg->validate_checksum())
-            {
-                return msg;
-            }
-            else
-            {
-                // Invalid checksum.  Delete message and reset to header search stage.
-                delete msg;
-                // Reset fifo.
-                for(unsigned int i = 0; i < 4; i++)
-                {
-                    fifo[i] = 0;
-                }
-                // Reset header found and packet size.
-                header_found = false;
-                packet_size = 0;
-                // Packet has already been cleaned up.
-            }
         }
         // If neither of the above cases occurs, we must wait for more bytes.
         else
@@ -297,8 +309,8 @@ void driver::read_nmea(unsigned int timeout_ms)
         {
             // Clean up packet if it exists (can occur between two states above).
             delete [] packet;
-            // Return nullptr.
-            return nullptr;
+            // Quit.
+            return;
         }
     }
 }

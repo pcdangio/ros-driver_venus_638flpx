@@ -3,6 +3,7 @@
 
 #include <string>
 #include <functional>
+#include <map>
 
 class driver
 {
@@ -37,16 +38,7 @@ protected:
 
 private:
 
-
-    enum class nmea_types
-    {
-        GGA = 68,
-        GLL = 49,
-        GSA = 61,
-        GSV = 45,
-        RMC = 67,
-        VTG = 31
-    };
+    std::map<std::string, unsigned short> m_nmea_types;
 
     class message
     {
