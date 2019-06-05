@@ -42,6 +42,9 @@ void driver::connect(std::string port)
         // Initialize the serial connection.
         initialize_serial(port, bauds[b]);
 
+        // Flush the inputs.
+        flush_rx();
+
         // Attempt to set the power to normal mode and listen for ACK.
         // Can use empty fields since 0x0000 = normal mode written to SRAM.
         driver::message cmd(driver::message::id_types::CONFIG_POWER, 2);

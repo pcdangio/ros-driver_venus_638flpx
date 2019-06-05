@@ -21,6 +21,7 @@ protected:
     virtual void write_data(const char* bytes, unsigned int length) = 0;
     virtual void read_data(char* bytes, unsigned int length) = 0;
     virtual unsigned int bytes_available() = 0;
+    virtual void flush_rx() = 0;
 
 private:
 

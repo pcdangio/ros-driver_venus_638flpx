@@ -14,6 +14,7 @@ protected:
     void write_data(const char* bytes, unsigned int length) override;
     void read_data(char* bytes, unsigned int length) override;
     unsigned int bytes_available() override;
+    void flush_rx() override;
 
 private:
     int m_pigpio_handle;
