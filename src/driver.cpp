@@ -17,7 +17,31 @@ driver::~driver()
 void driver::initialize(std::string port)
 {
     // Find and connect to the device.
-    driver::connect(port);
+    unsigned int baud = driver::connect(port);
+
+    // Switch to higher baud rate automatically to enable 20Hz rate.
+    if(baud != 115200)
+    {
+        driver::message msg(driver::message::id_types::CONFIG_SERIAL, 3);
+        // Set COM1 to 115200 in SRAM.
+        msg.write_field<unsigned char>(1, 0x05);
+        bool success = false;
+        if(driver::write_message(msg))
+        {
+            // Deinitialize the current serial port and reconnect.
+            deinitialize_serial();
+            unsigned int baud = driver::connect(port);
+            success = baud == 115200;
+        }
+        else
+        {
+            success = false;
+        }
+        if(success == false)
+        {
+            throw std::runtime_error("initialize: Could not change baud rate to 115200");
+        }
+    }
 
 }
 void driver::deinitialize()
@@ -31,10 +55,11 @@ void driver::spin()
 
 }
 
-void driver::connect(std::string port)
+unsigned int driver::connect(std::string port)
 {
     // Loop through known baud rates to check for a valid return.
     // Use expected order to reduce search time.
+    // NOTE: Datasheet lists only these four bauds, but register map document shows 19200 and 57600 as well.
     const unsigned int bauds[4] = {9600, 115200, 38400, 4800};
 
     for(unsigned int b = 0; b < 4; b++)
@@ -48,11 +73,11 @@ void driver::connect(std::string port)
         // Attempt to set the power to normal mode and listen for ACK.
         // Can use empty fields since 0x0000 = normal mode written to SRAM.
         driver::message cmd(driver::message::id_types::CONFIG_POWER, 2);
-        bool ack = driver::write_message(&cmd);
+        bool ack = driver::write_message(cmd);
         if(ack)
         {
             // Leave serial initialized and immediately return.
-            return;
+            return bauds[b];
         }
         else
         {
@@ -67,9 +92,9 @@ void driver::connect(std::string port)
     throw std::runtime_error(message.str());
 }
 
-bool driver::write_message(const message *msg)
+bool driver::write_message(const message &msg)
 {
-    write_data(msg->p_packet(), msg->p_packet_size());
+    write_data(msg.p_packet(), msg.p_packet_size());
 
     // Receive ACK or NAK.
     driver::message* ack_nak = driver::read_message();
