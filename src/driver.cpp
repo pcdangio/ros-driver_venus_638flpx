@@ -19,25 +19,19 @@ void driver::initialize(std::string port)
     // Find and connect to the device.
     unsigned int baud = driver::connect(port);
 
-    // Switch to higher baud rate automatically to enable 20Hz rate.
+    // Check if the serial port needs to be changed.
     if(baud != 115200)
     {
         driver::message msg(driver::message::id_types::CONFIG_SERIAL, 3);
-        // Set COM1 to 115200 in SRAM.
+        // Set COM1 to 115200 in FLASH (permanent).
         msg.write_field<unsigned char>(1, 0x05);
-        bool success = false;
-        if(driver::write_message(msg))
-        {
-            // Deinitialize the current serial port and reconnect.
-            deinitialize_serial();
-            unsigned int baud = driver::connect(port);
-            success = baud == 115200;
-        }
-        else
-        {
-            success = false;
-        }
-        if(success == false)
+        msg.write_field<unsigned char>(2, 0x01);
+        driver::write_message(msg);
+        // Reconnect serial at new baud rate.
+        deinitialize_serial();
+        unsigned int baud = driver::connect(port);
+        // Check that baud was successfully changed.
+        if(baud != 115200)
         {
             throw std::runtime_error("initialize: Could not change baud rate to 115200");
         }
@@ -60,7 +54,7 @@ unsigned int driver::connect(std::string port)
     // Loop through known baud rates to check for a valid return.
     // Use expected order to reduce search time.
     // NOTE: Datasheet lists only these four bauds, but register map document shows 19200 and 57600 as well.
-    const unsigned int bauds[4] = {9600, 115200, 38400, 4800};
+    const unsigned int bauds[4] = {115200, 9600, 38400, 4800};
 
     for(unsigned int b = 0; b < 4; b++)
     {
