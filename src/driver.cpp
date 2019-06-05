@@ -92,7 +92,7 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     // If timeout occurs anywhere in the process, quit out and return nullptr instead of exception.
 
     // Specify expected header.
-    const char header[2] = {static_cast<char>(0x0A), static_cast<char>(0xA1)};
+    const char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
     // Create fifo for reading header and payload size.
     char fifo[4] = {0, 0, 0, 0};
     // Create packet for receiving message.
