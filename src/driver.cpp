@@ -26,17 +26,24 @@ void driver::initialize(std::string port)
         // Set COM1 to 115200 in FLASH (permanent).
         msg.write_field<unsigned char>(1, 0x05);
         msg.write_field<unsigned char>(2, 0x01);
-        driver::write_message(msg);
-        // Reconnect serial at new baud rate.
-        deinitialize_serial();
-        unsigned int baud = driver::connect(port);
-        // Check that baud was successfully changed.
-        if(baud != 115200)
+        if(driver::write_message(msg, 250))
         {
-            throw std::runtime_error("initialize: Could not change baud rate to 115200");
+            // Reconnect serial at new baud rate.
+            deinitialize_serial();
+            unsigned int baud = driver::connect(port);
+            // Check that baud was successfully changed.
+            if(baud != 115200)
+            {
+                std::stringstream message;
+                message << "initialize: Baud rate did not change to 115200, still at " << baud << ".";
+                throw std::runtime_error(message.str());
+            }
+        }
+        else
+        {
+            throw std::runtime_error("initialize: No ACK for changing baud rate to 115200.");
         }
     }
-
 }
 void driver::deinitialize()
 {
@@ -67,7 +74,8 @@ unsigned int driver::connect(std::string port)
         // Attempt to set the power to normal mode and listen for ACK.
         // Can use empty fields since 0x0000 = normal mode written to SRAM.
         driver::message cmd(driver::message::id_types::CONFIG_POWER, 2);
-        bool ack = driver::write_message(cmd);
+        // Use longer timeout here in case board's serial is resetting.
+        bool ack = driver::write_message(cmd, 250);
         if(ack)
         {
             // Leave serial initialized and immediately return.
@@ -86,12 +94,12 @@ unsigned int driver::connect(std::string port)
     throw std::runtime_error(message.str());
 }
 
-bool driver::write_message(const message &msg)
+bool driver::write_message(const message &msg, unsigned int response_timeout_ms)
 {
     write_data(msg.p_packet(), msg.p_packet_size());
 
     // Receive ACK or NAK.
-    driver::message* ack_nak = driver::read_message();
+    driver::message* ack_nak = driver::read_message(response_timeout_ms);
     if(ack_nak)
     {
         return ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK;
