@@ -197,7 +197,7 @@ driver::message* driver::read_message(unsigned int timeout_ms)
         }
     }
 }
-
+#include <iostream>
 void driver::read_nmea()
 {
     // Attempt to read and parse all available bytes.
@@ -214,6 +214,7 @@ void driver::read_nmea()
 
     while(bytes_available())
     {
+        std::cout << bytes_available() << " bytes available. Continuing loop." << std::endl;
         // First check if rx buffer needs to be refereshed.
         if(rx_pos == rx_end)
         {
@@ -223,16 +224,19 @@ void driver::read_nmea()
             // Update rx_pos and rx_end.
             rx_pos = 0;
             rx_end = n_bytes; // Use length because rx_pos becoming rx_end means rx_pos is an invalid index.
+            std::cout << "Refreshed buffer: " << n_bytes << std::endl;
         }
 
         if(!header_found)
         {
+            std::cout << "Searching for header, starting at position: " << rx_pos << std::endl;
             // Scan rx_buffer for the 3-character $GP header.
             for( ; rx_pos <= rx_end - 3; rx_pos++)
             {
                 // Check current position for header.
                 if(rx_buffer[rx_pos] == '$' && rx_buffer[rx_pos+1] == 'G' && rx_buffer[rx_pos+2] == 'P')
                 {
+                    std::cout << "Header found at: " << rx_pos << std::endl;
                     // Header has been found.
                     // Mark flag.
                     header_found = true;
@@ -244,6 +248,7 @@ void driver::read_nmea()
         }
         else
         {
+            std::cout << "Searching for CLRF, starting at position: " << rx_pos << std::endl;
             // Header has been found, so search for CRLF.
             // Scan rx_buffer for the 2 character CRLF while copying scanned bytes into the parse buffer.
             unsigned short pa_index = 0;
@@ -252,6 +257,7 @@ void driver::read_nmea()
                 // Check the current position for CRLF
                 if(rx_buffer[rx_pos] == 0x0D && rx_buffer[rx_pos+1] == 0x0A)
                 {
+                    std::cout << "CLRF found at: " << rx_pos << std::endl;
                     // CRLF has been found.
                     // Reset header found flag.
                     header_found = false;
