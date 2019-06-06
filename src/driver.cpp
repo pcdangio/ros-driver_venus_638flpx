@@ -226,11 +226,10 @@ void driver::read_nmea(unsigned int timeout_ms)
 
     // Specify expected delimiter.
     const char delimiter[3] = {'$', 'G', 'P'};
-    // Create fifo for reading delimiter and message type.
-    char fifo[6] = {0, 0, 0, 0, 0, 0};
-    // Create packet for receiving message.
-    char* packet = nullptr;
-    unsigned short packet_size = 0;
+    // Create a buffer for reading the packet in.
+    char buffer[100];
+    // Create a buffer index for keeping track of write position.
+    unsigned short buffer_index = 6;
     // Create flag for if delimeter has been found.
     bool delimiter_found = false;
 
@@ -240,70 +239,83 @@ void driver::read_nmea(unsigned int timeout_ms)
         // If packet is nullptr, header hasn't been found yet. Read one byte at a time.
         if(!delimiter_found && bytes_available() > 0)
         {
-            // Shift bytes to the left in the fifo.
-            std::memcpy(&fifo[0], &fifo[1], 5);
+            // Shift bytes to the left in the buffer.
+            std::memcpy(&buffer[0], &buffer[1], 5);
 
-            // Read new byte into the end of the fifo.
-            read_data(&fifo[5], 1);
+            // Read new byte into the last delimiter position in the buffer.
+            read_data(&buffer[5], 1);
 
             // Check if delimiter matches
-            if(fifo[0] == delimiter[0] && fifo[1] == delimiter[1] && fifo[2] == delimiter[2])
+            if(buffer[0] == delimiter[0] && buffer[1] == delimiter[1] && buffer[2] == delimiter[2])
             {
                 // Mark that the delimiter was found.
                 delimiter_found = true;
-                // Read the message type.
-                std::string message_type(&fifo[3], 3);
-                // Check that the message type is valid.
-                if(driver::m_nmea_types.count(message_type) == 0)
-                {
-                    // Unknown message type, quit.
-                    return;
-                }
-                // Get the message length from the map.
-                packet_size = driver::m_nmea_types.at(message_type);
-                // Instantiate a new packet for receiving the message.
-                packet = new char[packet_size];
-                // Copy the header and payload length from the fifo into the buffer.
-                std::memcpy(&packet[0], &fifo[0], 6);
             }
         }
-        // If header has been found, block read the rest of the bytes if available.
-        else if(delimiter_found && bytes_available() >= packet_size - 6)
+        // If delimiter has been found, read bytes into a buffer until CLRF is found.
+        else if(delimiter_found && buffer_index < 100 && bytes_available() > 0)
         {
-            // Read the rest of the bytes.
-            read_data(&packet[6], packet_size - 6);
+            // Read the next byte into the buffer.
+            read_data(&buffer[buffer_index], 1);
 
-            std::string raw_data(packet, packet_size);
-            std::cout << "raw data: " << raw_data << std::endl;
+            // Check if the last two bytes in the buffer are CRLF.
+            if(buffer[buffer_index-1] == 0x0D && buffer[buffer_index] == 0x0A)
+            {
+                // This marks the end of the packet.
 
-            // Validate the checksum.
-            // First calculate checksum.
-            char expected_checksum = 0;
-            for(unsigned int i = 1; i < packet_size - 5; i++)
-            {
-                expected_checksum ^= packet[i];
-            }
-            // Convert packet's hex chars to an actualhex value.
-            std::stringstream packet_checksum_str;
-            packet_checksum_str << packet[packet_size - 4] << packet[packet_size - 3];
-            unsigned short packet_checksum;
-            packet_checksum_str >> std::hex >> packet_checksum;
-            // Compare checksums.
-            if(packet_checksum != static_cast<unsigned short>(expected_checksum))
-            {
-                // Checksum mistmatch, quit.
-                std::cout << "checksum mismatch, expected: " << std::hex << static_cast<unsigned short>(expected_checksum) << ", but got " << packet_checksum << std::endl;
+                // Calculate packet length.
+                unsigned short packet_size = buffer_index + 1;
+
+                std::string raw_data(buffer, packet_size);
+                std::cout << "raw message: " << raw_data << std::endl;
+
+                // Copy buffer into new packet.
+                char* packet = new char[packet_size];
+                std::memcpy(packet, buffer, packet_size);
+
+                // Validate the checksum.
+                // First calculate checksum.
+                char expected_checksum = 0;
+                for(unsigned int i = 1; i < packet_size - 5; i++)
+                {
+                    expected_checksum ^= packet[i];
+                }
+                // Convert packet's hex chars to an actualhex value.
+                std::stringstream packet_checksum_str;
+                packet_checksum_str << packet[packet_size - 4] << packet[packet_size - 3];
+                unsigned short packet_checksum;
+                packet_checksum_str >> std::hex >> packet_checksum;
+                // Compare checksums.
+                if(packet_checksum != static_cast<unsigned short>(expected_checksum))
+                {
+                    // Checksum mistmatch, quit.
+                    std::cout << "checksum mismatch, expected: " << std::hex << static_cast<unsigned short>(expected_checksum) << ", but got " << packet_checksum << std::endl;
+                    return;
+                }
+
+//                // Read the message type.
+//                std::string message_type(&buffer[3], 3);
+
+                // Call the appropriate message parser/signaler
+                std::string test_output(packet, packet_size);
+                std::cout << "good message: " << test_output << std::endl;
+
+                // Delete packet.
+                delete [] packet;
+
+                // Finish.
                 return;
             }
-
-            // Call the appropriate message parser/signaler
-            std::string test_output(packet, packet_size);
-            std::cout << "good message: " << test_output << std::endl;
-
-            // Delete packet.
-            delete [] packet;
-
-            // Finish.
+            else
+            {
+                // Packet not found.  Increment buffer index and continue.
+                buffer_index++;
+            }
+        }
+        // If buffer_index too high, quit.
+        else if(buffer_index >= 100)
+        {
+            std::cout << "buffer overflow" << std::endl;
             return;
         }
         // If neither of the above cases occurs, we must wait for more bytes.
@@ -316,9 +328,6 @@ void driver::read_nmea(unsigned int timeout_ms)
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time);
         if(elapsed.count() > timeout_ms)
         {
-            // Clean up packet if it exists (can occur between two states above).
-            delete [] packet;
-            // Quit.
             return;
         }
     }
