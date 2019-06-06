@@ -3,21 +3,19 @@
 
 #include <string>
 #include <functional>
-#include <map>
 
 class driver
 {
 public:
-    struct gga_message
+    struct data
     {
         double utc_time;
         double latitude;
         double longitude;
+        double altitude;
         unsigned char quality_indicator;
-        unsigned char n_satellites;
         float hdop;
-        float altitude;
-        int dgps_station;
+        float vdop;
     };
 
     driver();
@@ -37,9 +35,6 @@ protected:
     virtual void flush_rx() = 0;
 
 private:
-
-    std::map<std::string, unsigned short> m_nmea_types;
-
     class message
     {
     public:
@@ -80,15 +75,15 @@ private:
         void read_field(unsigned int address, unsigned int size, void* field) const;
     };
 
-
-
     std::function<void()> m_data_callback;
 
     bool write_message(const message& msg);
     message* read_message(unsigned int timeout_ms = 100);
 
     void read_nmea(unsigned int timeout_ms = 50);
-    gga_message parse_gga(char* nmea_string, unsigned int length);
+
+    void parse_gga(char* nmea_string, unsigned short length);
+    void parse_gsa(char* nmea_string, unsigned short length);
 
     unsigned int connect(std::string port);
 };

@@ -7,13 +7,7 @@
 
 driver::driver()
 {
-    // Initialize the map of NMEA types and lengths.
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GGA", 74));
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GLL", 51));
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GSA", 63));
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GSV", 47));
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("RMC", 69));
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("VTG", 33));
+
 }
 driver::~driver()
 {
@@ -264,20 +258,16 @@ void driver::read_nmea(unsigned int timeout_ms)
                 // Calculate packet length.
                 unsigned short packet_size = buffer_index + 1;
 
-                // Copy buffer into new packet.
-                char* packet = new char[packet_size];
-                std::memcpy(packet, buffer, packet_size);
-
                 // Validate the checksum.
                 // First calculate checksum.
                 char expected_checksum = 0;
                 for(unsigned int i = 1; i < packet_size - 5; i++)
                 {
-                    expected_checksum ^= packet[i];
+                    expected_checksum ^= buffer[i];
                 }
                 // Convert packet's hex chars to an actualhex value.
                 std::stringstream packet_checksum_str;
-                packet_checksum_str << packet[packet_size - 4] << packet[packet_size - 3];
+                packet_checksum_str << buffer[packet_size - 4] << buffer[packet_size - 3];
                 unsigned short packet_checksum;
                 packet_checksum_str >> std::hex >> packet_checksum;
                 // Compare checksums.
@@ -287,13 +277,18 @@ void driver::read_nmea(unsigned int timeout_ms)
                     return;
                 }
 
-//                // Read the message type.
-//                std::string message_type(&buffer[3], 3);
+                // Read the message type.
+                std::string message_type(&buffer[3], 3);
 
-                // Call the appropriate message parser/signaler
-
-                // Delete packet.
-                delete [] packet;
+                // Call the appropriate message parser.
+                if(message_type.compare("GGA") == 0)
+                {
+                    driver::parse_gga(buffer, packet_size);
+                }
+                else if(message_type.compare("GSA") == 0)
+                {
+                    driver::parse_gsa(buffer, packet_size);
+                }
 
                 // Finish.
                 return;
@@ -322,6 +317,17 @@ void driver::read_nmea(unsigned int timeout_ms)
             return;
         }
     }
+}
+#include <iostream>
+void driver::parse_gga(char *nmea_string, unsigned short length)
+{
+    std::string packet(nmea_string, length);
+    std::cout << "GGA Packet: " << packet << std::endl;
+}
+void driver::parse_gsa(char *nmea_string, unsigned short length)
+{
+    std::string packet(nmea_string, length);
+    std::cout << "GSA Packet: " << packet << std::endl;
 }
 
 // MESSAGE
