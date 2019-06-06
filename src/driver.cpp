@@ -209,6 +209,8 @@ void driver::read_nmea()
     // Create tracker for current position in the rx_buffer and the number of bytes actually read.
     unsigned short rx_pos = 0;
     unsigned short rx_len = 0;
+    // Create tracker for current position in the pa_buffer.
+    unsigned short pa_pos = 0;
     // Create flag for refreshing the rx_buffer.
     bool refresh_rx_buffer = true; // Set to true for initial loop start.
     // Create flag for indicating if a header has been found.
@@ -244,6 +246,8 @@ void driver::read_nmea()
                     // Header has been found.
                     // Mark flag.
                     header_found = true;
+                    // Reset pa_pos.
+                    pa_pos = 0;
                     // Break for loop to continue.
                     break;
                 }
@@ -256,7 +260,6 @@ void driver::read_nmea()
             std::cout << "Searching for CLRF, starting at position: " << rx_pos << std::endl;
             // Header has been found, so search for CRLF.
             // Scan rx_buffer for the 2 character CRLF while copying scanned bytes into the parse buffer.
-            unsigned short pa_index = 0;
             for( ; rx_pos <= rx_len - 2; rx_pos++)
             {
                 // Check the current position for CRLF
@@ -269,7 +272,7 @@ void driver::read_nmea()
 
                     // pa_buffer now contains a full message, and pa_index is it's length.
                     // Validate the message's checksum.
-                    if(driver::validate_nmea_checksum(pa_buffer, pa_index))
+                    if(driver::validate_nmea_checksum(pa_buffer, pa_pos))
                     {
                         std::cout << "Checksum validated" << std::endl;
                         // Determine message type.
@@ -277,11 +280,11 @@ void driver::read_nmea()
                         std::cout << "Message type: " << message_type << std::endl;
                         if(message_type.compare("GGA") == 0)
                         {
-                            driver::parse_gga(pa_buffer, pa_index);
+                            driver::parse_gga(pa_buffer, pa_pos);
                         }
                         else if(message_type.compare("GSA") == 0)
                         {
-                            driver::parse_gsa(pa_buffer, pa_index);
+                            driver::parse_gsa(pa_buffer, pa_pos);
                         }
                         // Don't do anything with messages that don't have an expected type.
                     }
@@ -294,14 +297,14 @@ void driver::read_nmea()
                 else
                 {
                     // Current position is not a CRLF.  Copy it into the pa_buffer.
-                    pa_buffer[pa_index++] = rx_buffer[rx_pos];
+                    pa_buffer[pa_pos++] = rx_buffer[rx_pos];
                 }
             }
             // If this position reached and header_found is still true, the rx_buffer ran out before the CLRF could be found. Refresh buffer.
             refresh_rx_buffer = header_found;
         }
         // Sleep to allow more bytes to come in.
-        usleep(1000);
+        usleep(5000);
     }
     std::cout << "No more bytes available. Quitting." << std::endl;
 }
