@@ -4,7 +4,6 @@
 #include <chrono>
 #include <unistd.h>
 #include <cstring>
-#include <iomanip>
 
 driver::driver()
 {
@@ -210,7 +209,6 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     }
 }
 
-#include <iostream>
 void driver::read_nmea(unsigned int timeout_ms)
 {
     // Attempt to read a single NMEA message with timeout.
@@ -266,9 +264,6 @@ void driver::read_nmea(unsigned int timeout_ms)
                 // Calculate packet length.
                 unsigned short packet_size = buffer_index + 1;
 
-                std::string raw_data(buffer, packet_size);
-                std::cout << "raw message: " << raw_data << std::endl;
-
                 // Copy buffer into new packet.
                 char* packet = new char[packet_size];
                 std::memcpy(packet, buffer, packet_size);
@@ -289,7 +284,6 @@ void driver::read_nmea(unsigned int timeout_ms)
                 if(packet_checksum != static_cast<unsigned short>(expected_checksum))
                 {
                     // Checksum mistmatch, quit.
-                    std::cout << "checksum mismatch, expected: " << std::hex << static_cast<unsigned short>(expected_checksum) << ", but got " << packet_checksum << std::endl;
                     return;
                 }
 
@@ -297,8 +291,6 @@ void driver::read_nmea(unsigned int timeout_ms)
 //                std::string message_type(&buffer[3], 3);
 
                 // Call the appropriate message parser/signaler
-                std::string test_output(packet, packet_size);
-                std::cout << "good message: " << test_output << std::endl;
 
                 // Delete packet.
                 delete [] packet;
@@ -315,7 +307,6 @@ void driver::read_nmea(unsigned int timeout_ms)
         // If buffer_index too high, quit.
         else if(buffer_index >= 100)
         {
-            std::cout << "buffer overflow" << std::endl;
             return;
         }
         // If neither of the above cases occurs, we must wait for more bytes.
