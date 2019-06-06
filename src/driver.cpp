@@ -206,9 +206,11 @@ void driver::read_nmea()
     const unsigned short buffer_size = 100;
     char rx_buffer[buffer_size];
     char pa_buffer[buffer_size];
-    // Create tracker for current position in the rx_buffer and the index of the last available position.
+    // Create tracker for current position in the rx_buffer and the number of bytes actually read.
     unsigned short rx_pos = 0;
-    unsigned short rx_end = 0;
+    unsigned short rx_len = 0;
+    // Create flag for refreshing the rx_buffer.
+    bool refresh_rx_buffer = true; // Set to true for initial loop start.
     // Create flag for indicating if a header has been found.
     bool header_found = false;
 
@@ -216,14 +218,16 @@ void driver::read_nmea()
     {
         std::cout << bytes_available() << " bytes available. Continuing loop." << std::endl;
         // First check if rx buffer needs to be refereshed.
-        if(rx_pos == rx_end)
+        if(refresh_rx_buffer)
         {
             // Read more bytes into the buffer.
             unsigned short n_bytes = static_cast<unsigned short>(std::min(static_cast<unsigned int>(buffer_size), bytes_available()));
             read_data(rx_buffer, n_bytes);
-            // Update rx_pos and rx_end.
+            // Update rx_pos and rx_len.
             rx_pos = 0;
-            rx_end = n_bytes; // Use length because rx_pos becoming rx_end means rx_pos is an invalid index.
+            rx_len = n_bytes; // Use length because rx_pos becoming rx_len means rx_pos is an invalid index.
+            // Reset refresh flag.
+            refresh_rx_buffer = false;
             std::cout << "Refreshed buffer: " << n_bytes << std::endl;
         }
 
@@ -231,7 +235,7 @@ void driver::read_nmea()
         {
             std::cout << "Searching for header, starting at position: " << rx_pos << std::endl;
             // Scan rx_buffer for the 3-character $GP header.
-            for( ; rx_pos <= rx_end - 3; rx_pos++)
+            for( ; rx_pos <= rx_len - 3; rx_pos++)
             {
                 // Check current position for header.
                 if(rx_buffer[rx_pos] == '$' && rx_buffer[rx_pos+1] == 'G' && rx_buffer[rx_pos+2] == 'P')
@@ -244,7 +248,8 @@ void driver::read_nmea()
                     break;
                 }
             }
-
+            // If this position reached and header_found is still false, the rx_buffer ran out before the header could be found. Refresh buffer.
+            refresh_rx_buffer = !header_found;
         }
         else
         {
@@ -252,7 +257,7 @@ void driver::read_nmea()
             // Header has been found, so search for CRLF.
             // Scan rx_buffer for the 2 character CRLF while copying scanned bytes into the parse buffer.
             unsigned short pa_index = 0;
-            for( ; rx_pos <= rx_end - 2; rx_pos++)
+            for( ; rx_pos <= rx_len - 2; rx_pos++)
             {
                 // Check the current position for CRLF
                 if(rx_buffer[rx_pos] == 0x0D && rx_buffer[rx_pos+1] == 0x0A)
@@ -289,6 +294,8 @@ void driver::read_nmea()
                     pa_buffer[pa_index++] = rx_buffer[rx_pos];
                 }
             }
+            // If this position reached and header_found is still true, the rx_buffer ran out before the CLRF could be found. Refresh buffer.
+            refresh_rx_buffer = header_found;
         }
     }
 }
