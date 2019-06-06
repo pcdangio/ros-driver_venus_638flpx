@@ -9,7 +9,7 @@
 driver::driver()
 {
     // Initialize the map of NMEA types and lengths.
-    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GGA", 70));
+    driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GGA", 74));
     driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GLL", 51));
     driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GSA", 63));
     driver::m_nmea_types.insert(std::pair<std::string, unsigned short>("GSV", 47));
@@ -230,7 +230,7 @@ void driver::read_nmea(unsigned int timeout_ms)
     char fifo[6] = {0, 0, 0, 0, 0, 0};
     // Create packet for receiving message.
     char* packet = nullptr;
-    unsigned int packet_size = 0;
+    unsigned short packet_size = 0;
     // Create flag for if delimeter has been found.
     bool delimiter_found = false;
 
@@ -260,7 +260,7 @@ void driver::read_nmea(unsigned int timeout_ms)
                     return;
                 }
                 // Get the message length from the map.
-                unsigned short packet_size = driver::m_nmea_types.at(message_type);
+                packet_size = driver::m_nmea_types.at(message_type);
                 // Instantiate a new packet for receiving the message.
                 packet = new char[packet_size];
                 // Copy the header and payload length from the fifo into the buffer.
@@ -273,29 +273,38 @@ void driver::read_nmea(unsigned int timeout_ms)
             // Read the rest of the bytes.
             read_data(&packet[6], packet_size - 6);
 
+            std::string raw_data(packet, packet_size);
+            std::cout << "raw data: " << raw_data << std::endl;
+
             // Validate the checksum.
             // First calculate checksum.
-            char checksum = 0;
+            char expected_checksum = 0;
             for(unsigned int i = 1; i < packet_size - 5; i++)
             {
-                checksum ^= packet[i];
+                expected_checksum ^= packet[i];
             }
-            // Convert checksum to 2 digit hex char array.
-            std::stringstream checksum_hex;
-            checksum_hex << std::setfill('0') << std::setw(2) << std::hex << checksum;
-            const char* checksum_array = checksum_hex.str().c_str();
-            if(checksum_array[0] != packet[packet_size - 4] || checksum_array[1] != packet[packet_size - 3])
+            // Convert packet's hex chars to an actualhex value.
+            std::stringstream packet_checksum_str;
+            packet_checksum_str << packet[packet_size - 4] << packet[packet_size - 3];
+            unsigned short packet_checksum;
+            packet_checksum_str >> std::hex >> packet_checksum;
+            // Compare checksums.
+            if(packet_checksum != static_cast<unsigned short>(expected_checksum))
             {
                 // Checksum mistmatch, quit.
+                std::cout << "checksum mismatch, expected: " << std::hex << static_cast<unsigned short>(expected_checksum) << ", but got " << packet_checksum << std::endl;
                 return;
             }
 
             // Call the appropriate message parser/signaler
             std::string test_output(packet, packet_size);
-            std::cout << test_output << std::endl;
+            std::cout << "good message: " << test_output << std::endl;
 
             // Delete packet.
             delete [] packet;
+
+            // Finish.
+            return;
         }
         // If neither of the above cases occurs, we must wait for more bytes.
         else
