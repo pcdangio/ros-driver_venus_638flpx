@@ -271,8 +271,10 @@ void driver::read_nmea()
                     // Validate the message's checksum.
                     if(driver::validate_nmea_checksum(pa_buffer, pa_index))
                     {
+                        std::cout << "Checksum validated" << std::endl;
                         // Determine message type.
                         std::string message_type(&pa_buffer[3], 3);
+                        std::cout << "Message type: " << message_type << std::endl;
                         if(message_type.compare("GGA") == 0)
                         {
                             driver::parse_gga(pa_buffer, pa_index);
@@ -284,6 +286,7 @@ void driver::read_nmea()
                         // Don't do anything with messages that don't have an expected type.
                     }
                     // If checksum mismatch, don't do anything with the message and just continue.
+                    std::cout << "Checksum mismatch" << std::endl;
 
                     // Break the for loop to continue.
                     break;
@@ -297,7 +300,10 @@ void driver::read_nmea()
             // If this position reached and header_found is still true, the rx_buffer ran out before the CLRF could be found. Refresh buffer.
             refresh_rx_buffer = header_found;
         }
+        // Sleep to allow more bytes to come in.
+        usleep(1000);
     }
+    std::cout << "No more bytes available. Quitting." << std::endl;
 }
 bool driver::validate_nmea_checksum(char *packet, unsigned int length)
 {
