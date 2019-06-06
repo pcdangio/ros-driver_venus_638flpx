@@ -242,6 +242,8 @@ void driver::read_nmea(unsigned int timeout_ms)
             {
                 // Mark that the delimiter was found.
                 delimiter_found = true;
+                // Reset the start time to get enough time to read the packet.
+                start_time = std::chrono::high_resolution_clock::now();
             }
         }
         // If delimiter has been found, read bytes into a buffer until CLRF is found.
