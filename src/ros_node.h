@@ -39,6 +39,10 @@ private:
     /// \brief m_node The node's handle.
     ///
     ros::NodeHandle* m_node;
+    ///
+    /// \brief m_scan_rate The rate at which to scan for NMEA messages.
+    ///
+    ros::Rate* m_scan_rate;
 
     // METHODS
     ///

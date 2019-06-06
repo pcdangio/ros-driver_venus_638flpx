@@ -15,6 +15,11 @@ ros_node::ros_node(driver *driver, int argc, char **argv)
     ros::NodeHandle private_node("~");
     std::string param_serial_port;
     private_node.param<std::string>("serial_port", param_serial_port, "/dev/ttyAMA0");
+    double param_scan_rate;
+    private_node.param<double>("scan_rate", param_scan_rate, 50.0);
+
+    // Initialize ros node members.
+    ros_node::m_scan_rate = new ros::Rate(param_scan_rate);
 
     // Initialize the driver and set parameters.
     try
@@ -36,6 +41,7 @@ ros_node::ros_node(driver *driver, int argc, char **argv)
 ros_node::~ros_node()
 {
     // Clean up resources.
+    delete ros_node::m_scan_rate;
     delete ros_node::m_node;
     delete ros_node::m_driver;
 }
@@ -44,9 +50,14 @@ void ros_node::spin()
 {
     while(ros::ok())
     {
-        ros_node::m_driver->spin();
+        // Scan for NMEA strings.
+        ros_node::m_driver->read_nmea();
 
+        // Spin the ros node once.
         ros::spinOnce();
+
+        // Loop.
+        ros_node::m_scan_rate->sleep();
     }
 
     // Deinitialize driver.

@@ -24,7 +24,7 @@ public:
     void initialize(std::string port);
     void deinitialize();
 
-    void spin();
+    void read_nmea();
 
 protected:
     virtual void initialize_serial(std::string port, unsigned int baud) = 0;
@@ -80,7 +80,8 @@ private:
     bool write_message(const message& msg);
     message* read_message(unsigned int timeout_ms = 100);
 
-    void read_nmea(unsigned int timeout_ms = 50);
+
+    bool validate_nmea_checksum(char* packet, unsigned int length);
 
     void parse_gga(char* nmea_string, unsigned short length);
     void parse_gsa(char* nmea_string, unsigned short length);

@@ -47,11 +47,6 @@ void driver::deinitialize()
     deinitialize_serial();
 }
 
-void driver::spin()
-{
-    driver::read_nmea();
-}
-
 unsigned int driver::connect(std::string port)
 {
     // Loop through known baud rates to check for a valid return.
@@ -203,123 +198,110 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     }
 }
 
-void driver::read_nmea(unsigned int timeout_ms)
+void driver::read_nmea()
 {
-    // Attempt to read a single NMEA message with timeout.
+    // Attempt to read and parse all available bytes.
 
-    // Set up a timeout duration.
-    std::chrono::time_point<std::chrono::high_resolution_clock> start_time = std::chrono::high_resolution_clock::now();
+    // Create RX and Parse buffers.
+    const unsigned short buffer_size = 100;
+    char rx_buffer[buffer_size];
+    char pa_buffer[buffer_size];
+    // Create tracker for current position in the rx_buffer and the index of the last available position.
+    unsigned short rx_pos = 0;
+    unsigned short rx_end = 0;
+    // Create flag for indicating if a header has been found.
+    bool header_found = false;
 
-    // Process is to look for $GP delimters, and then read message type to infer packet size.
-    // Create new packet byte array, transferring in delimiter and message type.
-    // Read expected remaining bytes into packet.
-    // When packet complete, validate checksum.  If mismatch, quit.
-    // If timeout occurs anywhere in the process, quit out and return nullptr instead of exception.
-
-    // Specify expected delimiter.
-    const char delimiter[3] = {'$', 'G', 'P'};
-    // Create a buffer for reading the packet in.
-    char buffer[100];
-    // Create a buffer index for keeping track of write position.
-    unsigned short buffer_index = 6;
-    // Create flag for if delimeter has been found.
-    bool delimiter_found = false;
-
-    // Loop forever; will kick out with either new message, bad checksum, or timeout.
-    while(true)
+    while(bytes_available())
     {
-        // If packet is nullptr, header hasn't been found yet. Read one byte at a time.
-        if(!delimiter_found && bytes_available() > 0)
+        // First check if rx buffer needs to be refereshed.
+        if(rx_pos == rx_end)
         {
-            // Shift bytes to the left in the buffer.
-            std::memcpy(&buffer[0], &buffer[1], 5);
-
-            // Read new byte into the last delimiter position in the buffer.
-            read_data(&buffer[5], 1);
-
-            // Check if delimiter matches
-            if(buffer[0] == delimiter[0] && buffer[1] == delimiter[1] && buffer[2] == delimiter[2])
-            {
-                // Mark that the delimiter was found.
-                delimiter_found = true;
-                // Reset the start time to get enough time to read the packet.
-                start_time = std::chrono::high_resolution_clock::now();
-            }
+            // Read more bytes into the buffer.
+            unsigned short n_bytes = static_cast<unsigned short>(std::min(static_cast<unsigned int>(buffer_size), bytes_available()));
+            read_data(rx_buffer, n_bytes);
+            // Update rx_pos and rx_end.
+            rx_pos = 0;
+            rx_end = n_bytes; // Use length because rx_pos becoming rx_end means rx_pos is an invalid index.
         }
-        // If delimiter has been found, read bytes into a buffer until CLRF is found.
-        else if(delimiter_found && buffer_index < 100 && bytes_available() > 0)
+
+        if(!header_found)
         {
-            // Read the next byte into the buffer.
-            read_data(&buffer[buffer_index], 1);
-
-            // Check if the last two bytes in the buffer are CRLF.
-            if(buffer[buffer_index-1] == 0x0D && buffer[buffer_index] == 0x0A)
+            // Scan rx_buffer for the 3-character $GP header.
+            for( ; rx_pos <= rx_end - 3; rx_pos++)
             {
-                // This marks the end of the packet.
-
-                // Calculate packet length.
-                unsigned short packet_size = buffer_index + 1;
-
-                // Validate the checksum.
-                // First calculate checksum.
-                char expected_checksum = 0;
-                for(unsigned int i = 1; i < packet_size - 5; i++)
+                // Check current position for header.
+                if(rx_buffer[rx_pos] == '$' && rx_buffer[rx_pos+1] == 'G' && rx_buffer[rx_pos+2] == 'P')
                 {
-                    expected_checksum ^= buffer[i];
+                    // Header has been found.
+                    // Mark flag.
+                    header_found = true;
+                    // Break for loop to continue.
+                    break;
                 }
-                // Convert packet's hex chars to an actualhex value.
-                std::stringstream packet_checksum_str;
-                packet_checksum_str << buffer[packet_size - 4] << buffer[packet_size - 3];
-                unsigned short packet_checksum;
-                packet_checksum_str >> std::hex >> packet_checksum;
-                // Compare checksums.
-                if(packet_checksum != static_cast<unsigned short>(expected_checksum))
-                {
-                    // Checksum mistmatch, quit.
-                    return;
-                }
-
-                // Read the message type.
-                std::string message_type(&buffer[3], 3);
-
-                // Call the appropriate message parser.
-                if(message_type.compare("GGA") == 0)
-                {
-                    driver::parse_gga(buffer, packet_size);
-                }
-                else if(message_type.compare("GSA") == 0)
-                {
-                    driver::parse_gsa(buffer, packet_size);
-                }
-
-                // Finish.
-                return;
             }
-            else
-            {
-                // Packet not found.  Increment buffer index and continue.
-                buffer_index++;
-            }
+
         }
-        // If buffer_index too high, quit.
-        else if(buffer_index >= 100)
-        {
-            return;
-        }
-        // If neither of the above cases occurs, we must wait for more bytes.
         else
         {
-            usleep(500);
-        }
+            // Header has been found, so search for CRLF.
+            // Scan rx_buffer for the 2 character CRLF while copying scanned bytes into the parse buffer.
+            unsigned short pa_index = 0;
+            for( ; rx_pos <= rx_end - 2; rx_pos++)
+            {
+                // Check the current position for CRLF
+                if(rx_buffer[rx_pos] == 0x0D && rx_buffer[rx_pos+1] == 0x0A)
+                {
+                    // CRLF has been found.
+                    // Reset header found flag.
+                    header_found = false;
 
-        // Check if timeout elapsed.  This allows for timeout when no bytes are available, or plenty of bytes are available but none produce a valid message.
-        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time);
-        if(elapsed.count() > timeout_ms)
-        {
-            return;
+                    // pa_buffer now contains a full message, and pa_index is it's length.
+                    // Validate the message's checksum.
+                    if(driver::validate_nmea_checksum(pa_buffer, pa_index))
+                    {
+                        // Determine message type.
+                        std::string message_type(&pa_buffer[3], 3);
+                        if(message_type.compare("GGA") == 0)
+                        {
+                            driver::parse_gga(pa_buffer, pa_index);
+                        }
+                        else if(message_type.compare("GSA") == 0)
+                        {
+                            driver::parse_gsa(pa_buffer, pa_index);
+                        }
+                        // Don't do anything with messages that don't have an expected type.
+                    }
+                    // If checksum mismatch, don't do anything with the message and just continue.
+
+                    // Break the for loop to continue.
+                    break;
+                }
+                else
+                {
+                    // Current position is not a CRLF.  Copy it into the pa_buffer.
+                    pa_buffer[pa_index++] = rx_buffer[rx_pos];
+                }
+            }
         }
     }
 }
+bool driver::validate_nmea_checksum(char *packet, unsigned int length)
+{
+    char expected_checksum = 0;
+    for(unsigned int i = 1; i < length - 3; i++)
+    {
+        expected_checksum ^= packet[i];
+    }
+    // Convert packet's hex chars to an actual hex value using streams.
+    std::stringstream packet_checksum_str;
+    packet_checksum_str << packet[length - 2] << packet[length - 1];
+    unsigned short packet_checksum;
+    packet_checksum_str >> std::hex >> packet_checksum;
+    // Compare checksums.
+    return packet_checksum == static_cast<unsigned short>(expected_checksum);
+}
+
 #include <iostream>
 void driver::parse_gga(char *nmea_string, unsigned short length)
 {
