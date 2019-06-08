@@ -208,101 +208,165 @@ void driver::read_nmea()
     char pa_buffer[buffer_size];
     // Create tracker for current position in the rx_buffer and the number of bytes actually read.
     unsigned short rx_pos = 0;
-    unsigned short rx_len = 0;
+    unsigned short rx_end = 0;
     // Create tracker for current position in the pa_buffer.
     unsigned short pa_pos = 0;
-    // Create flag for refreshing the rx_buffer.
-    bool refresh_rx_buffer = true; // Set to true for initial loop start.
-    // Create flag for indicating if a header has been found.
-    bool header_found = false;
+    // Create tracker for which byte is being searched for.
+    enum search_byte_type
+    {
+        header_1 = 0,   // $
+        header_2 = 1,   // G
+        header_3 = 2,   // P
+        footer_1 = 3,   // 0x0D (CR)
+        footer_2 = 4    // 0x0A (LF)
+    };
+    search_byte_type search_byte = header_1;
 
     while(bytes_available())
     {
         std::cout << bytes_available() << " bytes available. Continuing loop." << std::endl;
         // First check if rx buffer needs to be refereshed.
-        if(refresh_rx_buffer)
+        if(rx_pos == rx_end)
         {
             // Read more bytes into the buffer.
             unsigned short n_bytes = static_cast<unsigned short>(std::min(static_cast<unsigned int>(buffer_size), bytes_available()));
             read_data(rx_buffer, n_bytes);
             // Update rx_pos and rx_len.
             rx_pos = 0;
-            rx_len = n_bytes; // Use length because rx_pos becoming rx_len means rx_pos is an invalid index.
-            // Reset refresh flag.
-            refresh_rx_buffer = false;
+            rx_end = n_bytes; // Use length because rx_pos becoming rx_len means rx_pos is an invalid index.
             std::cout << "Refreshed buffer: " << n_bytes << std::endl;
         }
 
-        if(!header_found)
+        switch(search_byte)
         {
-            std::cout << "Searching for header, starting at position: " << rx_pos << std::endl;
+        case header_1:
+        {
+            std::cout << "Searching for header 1, starting at position: " << rx_pos << std::endl;
             // Scan rx_buffer for the 3-character $GP header.
-            for( ; rx_pos <= rx_len - 3; rx_pos++)
+            for( ; rx_pos < rx_end; rx_pos++)
             {
                 // Check current position for header.
-                if(rx_buffer[rx_pos] == '$' && rx_buffer[rx_pos+1] == 'G' && rx_buffer[rx_pos+2] == 'P')
+                if(rx_buffer[rx_pos] == '$')
                 {
-                    std::cout << "Header found at: " << rx_pos << std::endl;
-                    // Header has been found.
-                    // Mark flag.
-                    header_found = true;
-                    // Reset pa_pos.
+                    std::cout << "Header 1 found at: " << rx_pos << std::endl;
+                    // Header 1 has been found.
+                    // Signal next byte to search for.
+                    search_byte = header_2;
+                    // Reset pa_pos and start writing to the beginning.
                     pa_pos = 0;
+                    pa_buffer[pa_pos++] = '$';
                     // Break for loop to continue.
                     break;
                 }
             }
-            // If this position reached and header_found is still false, the rx_buffer ran out before the header could be found. Refresh buffer.
-            refresh_rx_buffer = !header_found;
+            // If this point is reached and header_1_found is false, then rx_pos == rx_end,
+            // rx_buffer will refresh, and will continue searching for header_1.
+            break;
         }
-        else
+        case header_2:
         {
-            std::cout << "Searching for CLRF, starting at position: " << rx_pos << std::endl;
-            // Header has been found, so search for CRLF.
-            // Scan rx_buffer for the 2 character CRLF while copying scanned bytes into the parse buffer.
-            for( ; rx_pos <= rx_len - 2; rx_pos++)
+            std::cout << "Searching for header 2, checking position: " << rx_pos << std::endl;
+            // Check the next position for header 2.
+            // Make sure to post-increment rx_pos.
+            if(rx_buffer[rx_pos++] == 'G')
             {
-                // Check the current position for CRLF
-                if(rx_buffer[rx_pos] == 0x0D && rx_buffer[rx_pos+1] == 0x0A)
+                std::cout << "Header 2 found at: " << rx_pos - 1 << std::endl;
+                // Header 2 has been found.
+                // Signal next byte to search for.
+                search_byte = header_3;
+                // Write byte to the pa_buffer.
+                pa_buffer[pa_pos++]= 'G';
+            }
+            else
+            {
+                std::cout << "Header 2 missing at: " << rx_pos - 1 << ", resetting." << std::endl;
+                // Header 2 was not found.  Reset to Header 1.
+                search_byte = header_1;
+            }
+            break;
+        }
+        case header_3:
+        {
+            std::cout << "Searching for header 3, checking position: " << rx_pos << std::endl;
+            // Check the next position for header 3.
+            // Make sure to post-increment rx_pos.
+            if(rx_buffer[rx_pos++] == 'P')
+            {
+                std::cout << "Header 3 found at: " << rx_pos - 1 << std::endl;
+                // Header 3 has been found.
+                // Signal next byte to search for.
+                search_byte = footer_1;
+                // Write byte to the pa_buffer.
+                pa_buffer[pa_pos++]= 'P';
+            }
+            else
+            {
+                std::cout << "Header 3 missing at: " << rx_pos - 1 << ", resetting." << std::endl;
+                // Header 3 was not found.  Reset to Header 1.
+                search_byte = header_1;
+            }
+            break;
+        }
+        case footer_1:
+        {
+            std::cout << "Searching for footer 1, startin gat position: " << rx_pos << std::endl;
+            // Scan rx_buffer for footer 1 while copying scanned bytes into the parse buffer.
+            for( ; rx_pos < rx_end; rx_pos++)
+            {
+                // Copy scanned byte into the buffer.
+                pa_buffer[pa_pos++] = rx_buffer[rx_pos];
+                // Check if the scanned byte is footer 1.
+                if(rx_buffer[rx_pos] == 0x0D)
                 {
-                    std::cout << "CLRF found at: " << rx_pos << std::endl;
-                    // CRLF has been found.
-                    // Reset header found flag.
-                    header_found = false;
-
-                    // pa_buffer now contains a full message, and pa_index is it's length.
-                    // Validate the message's checksum.
-                    if(driver::validate_nmea_checksum(pa_buffer, pa_pos))
-                    {
-                        std::cout << "Checksum validated" << std::endl;
-                        // Determine message type.
-                        std::string message_type(&pa_buffer[3], 3);
-                        std::cout << "Message type: " << message_type << std::endl;
-                        if(message_type.compare("GGA") == 0)
-                        {
-                            driver::parse_gga(pa_buffer, pa_pos);
-                        }
-                        else if(message_type.compare("GSA") == 0)
-                        {
-                            driver::parse_gsa(pa_buffer, pa_pos);
-                        }
-                        // Don't do anything with messages that don't have an expected type.
-                    }
-                    // If checksum mismatch, don't do anything with the message and just continue.
-                    std::cout << "Checksum mismatch" << std::endl;
-
-                    // Break the for loop to continue.
+                    std::cout << "Footer 1 found at: " << rx_pos << std::endl;
+                    // Footer 1 has been found.
+                    // Signal next byte to search for.
+                    search_byte = footer_2;
+                    // Break the foor loop.
                     break;
                 }
-                else
-                {
-                    // Current position is not a CRLF.  Copy it into the pa_buffer.
-                    pa_buffer[pa_pos++] = rx_buffer[rx_pos];
-                }
             }
-            // If this position reached and header_found is still true, the rx_buffer ran out before the CLRF could be found. Refresh buffer.
-            refresh_rx_buffer = header_found;
+            break;
         }
+        case footer_2:
+        {
+            std::cout << "Searching for footer_2, checking position: " << rx_pos << std::endl;
+            // Check the next position for footer 2.
+            // Make sure to post-increment rx_pos.
+            if(rx_buffer[rx_pos++] == 0x0A)
+            {
+                std::cout << "Footer 2 found at: " << rx_pos - 1 << std::endl;
+                // Footer 2 has been found.
+                // Write byte to the pa_buffer.
+                pa_buffer[pa_pos++]= 0x0A;
+
+                // pa_buffer now contains a full message, and pa_pos is it's length.
+                // Validate the message's checksum.
+                if(driver::validate_nmea_checksum(pa_buffer, pa_pos))
+                {
+                    std::cout << "Checksum validated" << std::endl;
+                    // Determine message type.
+                    std::string message_type(&pa_buffer[3], 3);
+                    std::cout << "Message type: " << message_type << std::endl;
+                    if(message_type.compare("GGA") == 0)
+                    {
+                        driver::parse_gga(pa_buffer, pa_pos);
+                    }
+                    else if(message_type.compare("GSA") == 0)
+                    {
+                        driver::parse_gsa(pa_buffer, pa_pos);
+                    }
+                    // Don't do anything with messages that don't have an expected type.
+                }
+                // If checksum mismatch, don't do anything with the message and just continue.
+                std::cout << "Checksum mismatch" << std::endl;
+            }
+            // Always reset to header 1 at this point, since either a full message was read, or a partial message failed.
+            search_byte = header_1;
+            break;
+        }
+        }
+
         // Sleep to allow more bytes to come in.
         usleep(5000);
     }
@@ -311,13 +375,13 @@ void driver::read_nmea()
 bool driver::validate_nmea_checksum(char *packet, unsigned int length)
 {
     char expected_checksum = 0;
-    for(unsigned int i = 1; i < length - 3; i++)
+    for(unsigned int i = 1; i < length - 5; i++)
     {
         expected_checksum ^= packet[i];
     }
     // Convert packet's hex chars to an actual hex value using streams.
     std::stringstream packet_checksum_str;
-    packet_checksum_str << packet[length - 2] << packet[length - 1];
+    packet_checksum_str << packet[length - 4] << packet[length - 3];
     unsigned short packet_checksum;
     packet_checksum_str >> std::hex >> packet_checksum;
     // Compare checksums.
