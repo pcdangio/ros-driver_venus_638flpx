@@ -197,7 +197,6 @@ driver::message* driver::read_message(unsigned int timeout_ms)
         }
     }
 }
-#include <iostream>
 void driver::read_nmea()
 {
     // Attempt to read and parse all available bytes.
@@ -222,9 +221,9 @@ void driver::read_nmea()
     };
     search_byte_type search_byte = header_1;
 
-    while(bytes_available())
+    // Loop while bytes are available to parse either in rx_buffer or the serial buffer.
+    while(rx_pos < rx_end || bytes_available())
     {
-        std::cout << bytes_available() << " bytes available. Continuing loop." << std::endl;
         // First check if rx buffer needs to be refereshed.
         if(rx_pos == rx_end)
         {
@@ -234,21 +233,18 @@ void driver::read_nmea()
             // Update rx_pos and rx_len.
             rx_pos = 0;
             rx_end = n_bytes; // Use length because rx_pos becoming rx_len means rx_pos is an invalid index.
-            std::cout << "Refreshed buffer: " << n_bytes << std::endl;
         }
 
         switch(search_byte)
         {
         case header_1:
         {
-            std::cout << "Searching for header 1, starting at position: " << rx_pos << std::endl;
             // Scan rx_buffer for the 3-character $GP header.
             for( ; rx_pos < rx_end; rx_pos++)
             {
                 // Check current position for header.
                 if(rx_buffer[rx_pos] == '$')
                 {
-                    std::cout << "Header 1 found at: " << rx_pos << std::endl;
                     // Header 1 has been found.
                     // Signal next byte to search for.
                     search_byte = header_2;
@@ -267,12 +263,10 @@ void driver::read_nmea()
         }
         case header_2:
         {
-            std::cout << "Searching for header 2, checking position: " << rx_pos << std::endl;
             // Check the next position for header 2.
             // Make sure to post-increment rx_pos.
             if(rx_buffer[rx_pos++] == 'G')
             {
-                std::cout << "Header 2 found at: " << rx_pos - 1 << std::endl;
                 // Header 2 has been found.
                 // Signal next byte to search for.
                 search_byte = header_3;
@@ -281,7 +275,6 @@ void driver::read_nmea()
             }
             else
             {
-                std::cout << "Header 2 missing at: " << rx_pos - 1 << ", resetting." << std::endl;
                 // Header 2 was not found.  Reset to Header 1.
                 search_byte = header_1;
             }
@@ -289,12 +282,10 @@ void driver::read_nmea()
         }
         case header_3:
         {
-            std::cout << "Searching for header 3, checking position: " << rx_pos << std::endl;
             // Check the next position for header 3.
             // Make sure to post-increment rx_pos.
             if(rx_buffer[rx_pos++] == 'P')
             {
-                std::cout << "Header 3 found at: " << rx_pos - 1 << std::endl;
                 // Header 3 has been found.
                 // Signal next byte to search for.
                 search_byte = footer_1;
@@ -303,7 +294,6 @@ void driver::read_nmea()
             }
             else
             {
-                std::cout << "Header 3 missing at: " << rx_pos - 1 << ", resetting." << std::endl;
                 // Header 3 was not found.  Reset to Header 1.
                 search_byte = header_1;
             }
@@ -311,7 +301,6 @@ void driver::read_nmea()
         }
         case footer_1:
         {
-            std::cout << "Searching for footer 1, startin gat position: " << rx_pos << std::endl;
             // Scan rx_buffer for footer 1 while copying scanned bytes into the parse buffer.
             for( ; rx_pos < rx_end; rx_pos++)
             {
@@ -320,7 +309,6 @@ void driver::read_nmea()
                 // Check if the scanned byte is footer 1.
                 if(rx_buffer[rx_pos] == 0x0D)
                 {
-                    std::cout << "Footer 1 found at: " << rx_pos << std::endl;
                     // Footer 1 has been found.
                     // Signal next byte to search for.
                     search_byte = footer_2;
@@ -334,12 +322,10 @@ void driver::read_nmea()
         }
         case footer_2:
         {
-            std::cout << "Searching for footer_2, checking position: " << rx_pos << std::endl;
             // Check the next position for footer 2.
             // Make sure to post-increment rx_pos.
             if(rx_buffer[rx_pos++] == 0x0A)
             {
-                std::cout << "Footer 2 found at: " << rx_pos - 1 << std::endl;
                 // Footer 2 has been found.
                 // Write byte to the pa_buffer.
                 pa_buffer[pa_pos++]= 0x0A;
@@ -348,10 +334,8 @@ void driver::read_nmea()
                 // Validate the message's checksum.
                 if(driver::validate_nmea_checksum(pa_buffer, pa_pos))
                 {
-                    std::cout << "Checksum validated" << std::endl;
                     // Determine message type.
                     std::string message_type(&pa_buffer[3], 3);
-                    std::cout << "Message type: " << message_type << std::endl;
                     if(message_type.compare("GGA") == 0)
                     {
                         driver::parse_gga(pa_buffer, pa_pos);
@@ -363,7 +347,6 @@ void driver::read_nmea()
                     // Don't do anything with messages that don't have an expected type.
                 }
                 // If checksum mismatch, don't do anything with the message and just continue.
-                std::cout << "Checksum mismatch" << std::endl;
             }
             // Always reset to header 1 at this point, since either a full message was read, or a partial message failed.
             search_byte = header_1;
@@ -374,7 +357,6 @@ void driver::read_nmea()
         // Sleep to allow more bytes to come in.
         usleep(5000);
     }
-    std::cout << "No more bytes available. Quitting." << std::endl;
 }
 bool driver::validate_nmea_checksum(char *packet, unsigned int length)
 {
