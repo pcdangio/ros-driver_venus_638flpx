@@ -256,6 +256,8 @@ void driver::read_nmea()
                     pa_pos = 0;
                     pa_buffer[pa_pos++] = '$';
                     // Break for loop to continue.
+                    // rx_pos must be manually incremented here since for loop is being broken.
+                    rx_pos++;
                     break;
                 }
             }
@@ -322,7 +324,9 @@ void driver::read_nmea()
                     // Footer 1 has been found.
                     // Signal next byte to search for.
                     search_byte = footer_2;
-                    // Break the foor loop.
+                    // Break the for loop.
+                    // rx_pos must be manually incremented here since for loop is being broken.
+                    rx_pos++;
                     break;
                 }
             }
