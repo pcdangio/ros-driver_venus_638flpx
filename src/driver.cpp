@@ -355,14 +355,17 @@ void driver::read_nmea()
                     else if(message_type.compare("GSA") == 0)
                     {
                         driver::parse_gsa(pa_buffer, pa_pos);
+
+                        // This is the last message containing needed data.
+                        // Raise the data ready callback and pass in the current data.
+                        if(driver::m_data_callback)
+                        {
+                            driver::m_data_callback(driver::m_current_data);
+                        }
                     }
                     // Don't do anything with messages that don't have an expected type.
 
-                    // Raise the data ready callback and pass in the current data.
-                    if(driver::m_data_callback)
-                    {
-                        driver::m_data_callback(driver::m_current_data);
-                    }
+
                 }
                 // If checksum mismatch, don't do anything with the message and just continue.
             }
