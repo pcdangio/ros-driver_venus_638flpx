@@ -94,33 +94,34 @@ void ros_node::data_callback(driver::data data)
     sensor_msgs::NavSatFix nav_message;
     nav_message.header.stamp = ros::Time::now();
     nav_message.header.frame_id = "driver_mpu9250";
-    nav_message.status.service = nav_message.status.SERVICE_GPS;
-    switch(data.fix_type)
+    nav_message.status.service = sensor_msgs::NavSatStatus::SERVICE_GPS;
+    if(data.fix_type == 1)
     {
-    case 1: // No fix.
-    {
-        nav_message.status.status = nav_message.status.STATUS_NO_FIX;
+        // No fix.
+        nav_message.status.status = sensor_msgs::NavSatStatus::STATUS_NO_FIX;
         nav_message.latitude = std::numeric_limits<double>::quiet_NaN();
         nav_message.longitude = std::numeric_limits<double>::quiet_NaN();;
         nav_message.altitude = std::numeric_limits<double>::quiet_NaN();
-        break;
+        nav_message.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
+        nav_message.position_covariance.fill(std::numeric_limits<double>::quiet_NaN());
     }
-    case 2: // 2D Fix
+    else
     {
-        nav_message.status.status = nav_message.status.STATUS_FIX;
+        // 2D or 3D fix.
+        nav_message.status.status = sensor_msgs::NavSatStatus::STATUS_FIX;
         nav_message.latitude = data.latitude;
         nav_message.longitude = data.longitude;
         nav_message.altitude = std::numeric_limits<double>::quiet_NaN();
-        break;
+        // Calculate covariances. Cx = Cy = (UERE*HDOP)^2, Cz = (UERE*VDOP)^2
+        nav_message.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_APPROXIMATED;
+        nav_message.position_covariance = {std::pow(6.74*static_cast<double>(data.hdop), 2.0), 0.0, 0.0,
+                                           0.0, std::pow(6.74*static_cast<double>(data.hdop), 2.0), 0.0,
+                                           0.0, 0.0, std::pow(6.74*static_cast<double>(data.vdop), 2.0)};
     }
-    case 3: // 3D Fix
+    if(data.fix_type == 3)
     {
-        nav_message.status.status = nav_message.status.STATUS_FIX;
-        nav_message.latitude = data.latitude;
-        nav_message.longitude = data.longitude;
+        // 3D fix.
         nav_message.altitude = data.altitude;
-        break;
-    }
     }
     // Publish time message.
     ros_node::m_nav_publisher.publish(nav_message);
