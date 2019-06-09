@@ -39,12 +39,25 @@ private:
     /// \brief m_node The node's handle.
     ///
     ros::NodeHandle* m_node;
+    ///
+    /// \brief m_publisher The node's NavSatFix message publisher.
+    ///
+    ros::Publisher m_nav_publisher;
+    ///
+    /// \brief m_time_publisher The node's TimeReference message publisher.
+    ///
+    ros::Publisher m_time_publisher;
+    ///
+    /// \brief m_scan_rate The rate at which to scan for NMEA messages.
+    ///
+    ros::Rate* m_scan_rate;
 
     // METHODS
     ///
     /// \brief deinitialize_driver Deinitializes the driver.
     ///
     void deinitialize_driver();
+    void data_callback(driver::data data);
 };
 
 #endif // ROS_NODE_H

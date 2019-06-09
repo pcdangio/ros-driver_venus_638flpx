@@ -9,11 +9,12 @@ class driver
 public:
     struct data
     {
-        double utc_time;
+        double utc_time_of_day;
         double latitude;
         double longitude;
         double altitude;
-        unsigned char quality_indicator;
+        int quality_indicator;
+        int fix_type;
         float hdop;
         float vdop;
     };
@@ -25,6 +26,9 @@ public:
     void deinitialize();
 
     void spin();
+    void set_data_callback(std::function<void(data)> callback);
+
+
 
 protected:
     virtual void initialize_serial(std::string port, unsigned int baud) = 0;
@@ -75,15 +79,16 @@ private:
         void read_field(unsigned int address, unsigned int size, void* field) const;
     };
 
-    std::function<void()> m_data_callback;
+    std::function<void(data)> m_data_callback;
 
     bool write_message(const message& msg);
     message* read_message(unsigned int timeout_ms = 100);
 
-    void read_nmea(unsigned int timeout_ms = 50);
-
-    void parse_gga(char* nmea_string, unsigned short length);
-    void parse_gsa(char* nmea_string, unsigned short length);
+    void read_nmea();
+    bool validate_nmea_checksum(char* packet, unsigned int length);
+    void parse_gga(const char* nmea_string, unsigned short length);
+    void parse_gsa(const char* nmea_string, unsigned short length);
+    data m_current_data;
 
     unsigned int connect(std::string port);
 };
