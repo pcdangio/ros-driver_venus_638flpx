@@ -47,6 +47,16 @@ void driver::deinitialize()
     deinitialize_serial();
 }
 
+void driver::spin()
+{
+    driver::read_nmea();
+}
+void driver::set_data_callback(std::function<void (data)> callback)
+{
+    driver::m_data_callback = callback;
+}
+
+
 unsigned int driver::connect(std::string port)
 {
     // Loop through known baud rates to check for a valid return.
@@ -83,6 +93,8 @@ unsigned int driver::connect(std::string port)
     message << "find_device: Could not find device on port " << port << " at any of the expected baud rates.";
     throw std::runtime_error(message.str());
 }
+
+
 
 bool driver::write_message(const message &msg)
 {
@@ -345,6 +357,12 @@ void driver::read_nmea()
                         driver::parse_gsa(pa_buffer, pa_pos);
                     }
                     // Don't do anything with messages that don't have an expected type.
+
+                    // Raise the data ready callback and pass in the current data.
+                    if(driver::m_data_callback)
+                    {
+                        driver::m_data_callback(driver::m_current_data);
+                    }
                 }
                 // If checksum mismatch, don't do anything with the message and just continue.
             }
@@ -374,16 +392,106 @@ bool driver::validate_nmea_checksum(char *packet, unsigned int length)
     return packet_checksum == static_cast<unsigned short>(expected_checksum);
 }
 
-#include <iostream>
-void driver::parse_gga(char *nmea_string, unsigned short length)
+void driver::parse_gga(const char *nmea_string, unsigned short length)
 {
-    std::string packet(nmea_string, length);
-    std::cout << "GGA Packet: " << packet << std::endl;
+    // Remove $GPGAA, from the front and */checksum/CR/LF from end.
+    std::string data(&nmea_string[7], length - 12);
+
+    // Parse through each comma separated field.
+    // There are 14 data fields in GGA.
+    std::stringstream data_stream(data);
+    std::string field;
+
+    // FIELD 1: UTC hhmmss.sss
+    std::getline(data_stream, field, ',');
+    // Read hours and minutes.
+    int hours = std::stoi(field.substr(0, 2));
+    int minutes = std::stoi(field.substr(2, 2));
+    // Calculate total seconds from hours, minutes, and seconds strings.
+    driver::m_current_data.utc_time_of_day = std::stod(field.substr(4)) + static_cast<double>(hours * 3600 + minutes * 60);
+
+    // FIELD 2: Latitude ddmm.mmmm
+    std::getline(data_stream, field, ',');
+    // Read degrees.
+    driver::m_current_data.latitude = std::stod(field.substr(0, 2));
+    // Read minutes and add to degrees.
+    driver::m_current_data.latitude += std::stod(field.substr(2)) / 60.0;
+
+    // FIELD 3: Latitude N/S
+    std::getline(data_stream, field, ',');
+    if(field.compare("S") == 0)
+    {
+        driver::m_current_data.latitude *= -1.0;
+    }
+
+    // FIELD 4: Longitude dddmm.mmmm
+    std::getline(data_stream, field, ',');
+    // Read degrees.
+    driver::m_current_data.longitude = std::stod(field.substr(0, 3));
+    // Read minutes and add to degrees.
+    driver::m_current_data.longitude += std::stod(field.substr(3)) / 60.0;
+
+    // FIELD 5: Longitude E/W
+    std::getline(data_stream, field, ',');
+    if(field.compare("W") == 0)
+    {
+        driver::m_current_data.longitude *= -1.0;
+    }
+
+    // FIELD 6: Quality Indicator
+    std::getline(data_stream, field, ',');
+    driver::m_current_data.quality_indicator = std::stoi(field);
+
+    // FIELD 7: Satellites Used xx
+    std::getline(data_stream, field, ',');
+    // Unused.
+
+    // FIELD 8: HDOP x.x
+    std::getline(data_stream, field, ',');
+    // Unused.  HDOP coming from GSA.
+
+    // FIELD 9: Altitude
+    std::getline(data_stream, field, ',');
+    driver::m_current_data.altitude = std::stod(field);
+
+    // FIELD 10-13: Unused.
 }
-void driver::parse_gsa(char *nmea_string, unsigned short length)
+void driver::parse_gsa(const char *nmea_string, unsigned short length)
 {
-    std::string packet(nmea_string, length);
-    std::cout << "GSA Packet: " << packet << std::endl;
+    // Remove $GPGSA, from the front and */checksum/CR/LF from end.
+    std::string data(&nmea_string[7], length - 12);
+
+    // Parse through each comma separated field.
+    // There are 17 data fields in GSA.
+    std::stringstream data_stream(data);
+    std::string field;
+
+    // FIELD 1: Fix Selection Mode x
+    std::getline(data_stream, field, ',');
+    // Unused.
+
+    // FIELD 2: Fix Type x
+    std::getline(data_stream, field, ',');
+    driver::m_current_data.fix_type = std::stoi(field);
+
+    // FIELD 3-14: Satellite PRNS xx
+    for(int f = 3; f <= 14; f++)
+    {
+        std::getline(data_stream, field, ',');
+        // Unused.
+    }
+
+    // FIELD 15: PDOP x.x
+    std::getline(data_stream, field, ',');
+    // Unused.
+
+    // FIELD 16: HDOP x.x
+    std::getline(data_stream, field, ',');
+    driver::m_current_data.hdop = std::stof(field);
+
+    // FIELD 17: VDOP x.x
+    std::getline(data_stream, field, ',');
+    driver::m_current_data.vdop = std::stof(field);
 }
 
 // MESSAGE
