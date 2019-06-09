@@ -1,5 +1,9 @@
 #include "ros_node.h"
 
+#include <sensor_msgs/NavSatFix.h>
+#include <sensor_msgs/NavSatStatus.h>
+#include <sensor_msgs/TimeReference.h>
+
 ros_node::ros_node(driver *driver, int argc, char **argv)
 {
     // Create a new driver.
@@ -18,12 +22,17 @@ ros_node::ros_node(driver *driver, int argc, char **argv)
     double param_scan_rate;
     private_node.param<double>("scan_rate", param_scan_rate, 50.0);
 
+    // Set up publishers.
+
     // Initialize ros node members.
     ros_node::m_scan_rate = new ros::Rate(param_scan_rate);
 
     // Initialize the driver and set parameters.
     try
     {
+        // Attach the callback to the driver.
+        ros_node::m_driver->set_data_callback(std::bind(&ros_node::data_callback, this, std::placeholders::_1));
+
         // Initialize driver.
         ros_node::m_driver->initialize(param_serial_port);
 
@@ -51,7 +60,7 @@ void ros_node::spin()
     while(ros::ok())
     {
         // Scan for NMEA strings.
-        ros_node::m_driver->read_nmea();
+        ros_node::m_driver->spin();
 
         // Spin the ros node once.
         ros::spinOnce();
@@ -75,4 +84,13 @@ void ros_node::deinitialize_driver()
     {
         ROS_FATAL_STREAM(e.what());
     }
+}
+
+void ros_node::data_callback(driver::data data)
+{
+    // Populate nav sat message.
+    sensor_msgs::NavSatFix message;
+    message.header.stamp = ros::Time::now();
+    message.header.frame_id = "driver_mpu9250";
+    message.
 }
