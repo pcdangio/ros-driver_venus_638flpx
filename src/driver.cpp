@@ -56,7 +56,7 @@ void driver::initialize(std::string port)
     // Set the Position Rate.
     driver::message rate_msg(driver::message::id_types::CONFIG_RATE, 2);
     // Set 20Hz.
-    rate_msg.write_field<unsigned char>(0, 20);
+    rate_msg.write_field<unsigned char>(0, 0x14);
     // Write to flash.
     rate_msg.write_field<unsigned char>(1, 0x01);
     if(driver::write_message(rate_msg) == false)
