@@ -21,6 +21,7 @@ ros_node::ros_node(driver *driver, int argc, char **argv)
     private_node.param<std::string>("serial_port", param_serial_port, "/dev/ttyAMA0");
     double param_scan_rate;
     private_node.param<double>("scan_rate", param_scan_rate, 50.0);
+    private_node.param<double>("uere", ros_node::m_uere, 6.74);
 
     // Set up publishers.
     ros_node::m_nav_publisher = ros_node::m_node->advertise<sensor_msgs::NavSatFix>("gps/position", 1);
@@ -112,11 +113,14 @@ void ros_node::data_callback(driver::data data)
         nav_message.latitude = data.latitude;
         nav_message.longitude = data.longitude;
         nav_message.altitude = std::numeric_limits<double>::quiet_NaN();
-        // Calculate covariances. Cx = Cy = (UERE*HDOP)^2, Cz = (UERE*VDOP)^2
+        // Set covariance matrix.
         nav_message.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_APPROXIMATED;
-        nav_message.position_covariance = {std::pow(6.74*static_cast<double>(data.hdop), 2.0), 0.0, 0.0,
-                                           0.0, std::pow(6.74*static_cast<double>(data.hdop), 2.0), 0.0,
-                                           0.0, 0.0, std::pow(6.74*static_cast<double>(data.vdop), 2.0)};
+        // Calculate cov_xy = (uere*hdop)^2 / 2, cov_z = (uere*vdop)^2
+        double cov_xy = std::pow(ros_node::m_uere * static_cast<double>(data.hdop), 2.0) / 2.0;
+        double cov_z = std::pow(ros_node::m_uere * static_cast<double>(data.vdop), 2.0);
+        nav_message.position_covariance = {cov_xy, 0.0, 0.0,
+                                           0.0, cov_xy, 0.0,
+                                           0.0, 0.0, cov_z};
     }
     if(data.fix_type == 3)
     {

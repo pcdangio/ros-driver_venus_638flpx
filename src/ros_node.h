@@ -51,12 +51,20 @@ private:
     /// \brief m_scan_rate The rate at which to scan for NMEA messages.
     ///
     ros::Rate* m_scan_rate;
+    ///
+    /// \brief m_uere Stores the User Equivalent Range Error (UERE) for the sensor.
+    ///
+    double m_uere;
 
     // METHODS
     ///
     /// \brief deinitialize_driver Deinitializes the driver.
     ///
     void deinitialize_driver();
+    ///
+    /// \brief data_callback The callback for processing new GPS data.
+    /// \param data The most recent GPS data.
+    ///
     void data_callback(driver::data data);
 };
 
