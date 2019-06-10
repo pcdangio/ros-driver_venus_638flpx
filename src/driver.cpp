@@ -42,24 +42,24 @@ void driver::initialize(std::string port)
     }
 
     // Set the NMEA messages.
-    driver::message msg(driver::message::id_types::CONFIG_NMEA, 8);
+    driver::message nmea_msg(driver::message::id_types::CONFIG_NMEA, 8);
     // Enable GGA and GSA.
-    msg.write_field<unsigned char>(0, 0x01);
-    msg.write_field<unsigned char>(1, 0x01);
+    nmea_msg.write_field<unsigned char>(0, 0x01);
+    nmea_msg.write_field<unsigned char>(1, 0x01);
     // Write to flash.
-    msg.write_field<unsigned char>(7, 0x01);
-    if(driver::write_message(msg) == false)
+    nmea_msg.write_field<unsigned char>(7, 0x01);
+    if(driver::write_message(nmea_msg) == false)
     {
         throw std::runtime_error("initialize: Could not configure NMEA messages.");
     }
 
     // Set the Position Rate.
-    driver::message msg(driver::message::id_types::CONFIG_RATE, 2);
+    driver::message rate_msg(driver::message::id_types::CONFIG_RATE, 2);
     // Set 20Hz.
-    msg.write_field<unsigned char>(0, 20);
+    rate_msg.write_field<unsigned char>(0, 20);
     // Write to flash.
-    msg.write_field<unsigned char>(1, 0x01);
-    if(driver::write_message(msg) == false)
+    rate_msg.write_field<unsigned char>(1, 0x01);
+    if(driver::write_message(rate_msg) == false)
     {
         throw std::runtime_error("initialize: Could not configure update rate.");
     }
