@@ -40,6 +40,20 @@ void driver::initialize(std::string port)
             throw std::runtime_error(message.str());
         }
     }
+
+    // Set the NMEA messages.
+    driver::message msg(driver::message::id_types::CONFIG_NMEA, 8);
+    // Enable GGA and GSA.
+    msg.write_field<unsigned char>(0, 0x01);
+    msg.write_field<unsigned char>(1, 0x01);
+    // Write to flash.
+    msg.write_field<unsigned char>(7, 0x01);
+    if(driver::write_message(msg) == false)
+    {
+        throw std::runtime_error("initialize: Could not configure NMEA messages.");
+    }
+
+    // Set the
 }
 void driver::deinitialize()
 {
@@ -443,7 +457,7 @@ void driver::parse_gga(const char *nmea_string, unsigned short length)
 
     // FIELD 6: Quality Indicator
     std::getline(data_stream, field, ',');
-    driver::m_current_data.quality_indicator = std::stoi(field);
+    // Unused. Using fix type from GSA instead.
 
     // FIELD 7: Satellites Used xx
     std::getline(data_stream, field, ',');

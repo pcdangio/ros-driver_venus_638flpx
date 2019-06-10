@@ -13,7 +13,6 @@ public:
         double latitude;
         double longitude;
         double altitude;
-        int quality_indicator;
         int fix_type;
         float hdop;
         float vdop;
@@ -45,6 +44,7 @@ private:
         enum class id_types
         {
             CONFIG_SERIAL = 0x05,
+            CONFIG_NMEA = 0x08,
             CONFIG_POWER = 0x0C,
             CONFIG_RATE = 0x0E,
             RESPONSE_ACK = 0x83,
