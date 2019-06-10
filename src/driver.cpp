@@ -53,7 +53,16 @@ void driver::initialize(std::string port)
         throw std::runtime_error("initialize: Could not configure NMEA messages.");
     }
 
-    // Set the
+    // Set the Position Rate.
+    driver::message msg(driver::message::id_types::CONFIG_RATE, 2);
+    // Set 20Hz.
+    msg.write_field<unsigned char>(0, 20);
+    // Write to flash.
+    msg.write_field<unsigned char>(1, 0x01);
+    if(driver::write_message(msg) == false)
+    {
+        throw std::runtime_error("initialize: Could not configure update rate.");
+    }
 }
 void driver::deinitialize()
 {
