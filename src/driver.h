@@ -1,12 +1,20 @@
+/// \file driver.h
+/// \brief Defines the driver class.
 #ifndef DRIVER_H
 #define DRIVER_H
 
 #include <string>
 #include <functional>
 
+///
+/// \brief An extendable driver class for the Venus 638FLX GPS.
+///
 class driver
 {
 public:
+    ///
+    /// \brief Contains all relevant sensed GPS data.
+    ///
     struct data
     {
         double utc_time_of_day;
@@ -18,9 +26,16 @@ public:
         float vdop;
     };
 
+    ///
+    /// \brief driver Creates a new driver instance.
+    ///
     driver();
     virtual ~driver();
 
+    ///
+    /// \brief initialize Initializes the driver and Venus GPS.
+    /// \param port
+    ///
     void initialize(std::string port);
     void deinitialize();
 
