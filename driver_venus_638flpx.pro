@@ -19,4 +19,5 @@ HEADERS += \
 
 DISTFILES += \
     CMakeLists.txt \
+    README.md \
     package.xml
