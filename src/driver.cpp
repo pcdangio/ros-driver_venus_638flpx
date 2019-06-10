@@ -69,17 +69,6 @@ void driver::deinitialize()
     // Deinitialize serial interface.
     deinitialize_serial();
 }
-
-void driver::spin()
-{
-    driver::read_nmea();
-}
-void driver::set_data_callback(std::function<void (data)> callback)
-{
-    driver::m_data_callback = callback;
-}
-
-
 unsigned int driver::connect(std::string port)
 {
     // Loop through known baud rates to check for a valid return.
@@ -117,7 +106,14 @@ unsigned int driver::connect(std::string port)
     throw std::runtime_error(message.str());
 }
 
-
+void driver::set_data_callback(std::function<void (data)> callback)
+{
+    driver::m_data_callback = callback;
+}
+void driver::spin()
+{
+    driver::read_nmea();
+}
 
 bool driver::write_message(const message &msg)
 {
@@ -417,7 +413,6 @@ bool driver::validate_nmea_checksum(char *packet, unsigned int length)
     // Compare checksums.
     return packet_checksum == static_cast<unsigned short>(expected_checksum);
 }
-
 void driver::parse_gga(const char *nmea_string, unsigned short length)
 {
     // Remove $GPGAA, from the front and */checksum/CR/LF from end.
@@ -728,7 +723,6 @@ const char* driver::message::p_packet() const
 {
     return driver::message::m_packet;
 }
-
 driver::message::id_types driver::message::p_message_id() const
 {
     return static_cast<driver::message::id_types>(driver::message::m_packet[4]);
