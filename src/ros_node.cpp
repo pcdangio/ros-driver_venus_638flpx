@@ -4,10 +4,10 @@
 #include <sensor_msgs/NavSatStatus.h>
 #include <sensor_msgs/TimeReference.h>
 
-ros_node::ros_node(driver *driver, int argc, char **argv)
+ros_node::ros_node(int argc, char **argv)
 {
     // Create a new driver.
-    ros_node::m_driver = driver;
+    ros_node::m_driver = new driver();
 
     // Initialize the ROS node.
     ros::init(argc, argv, "driver_mpu9250");
