@@ -3,6 +3,8 @@
 #ifndef DRIVER_H
 #define DRIVER_H
 
+#include <serial/serial.h>
+
 #include <string>
 #include <functional>
 
@@ -76,40 +78,6 @@ public:
     ///
     void spin();
 
-protected:
-    // METHODS
-    ///
-    /// \brief initialize_serial Initializes the serial port of the driver.
-    /// \param port The serial port to use.
-    /// \param baud The baud rate to use.
-    ///
-    virtual void initialize_serial(std::string port, unsigned int baud) = 0;
-    ///
-    /// \brief deinitialize_serial Deinitializes the serial port of the driver.
-    ///
-    virtual void deinitialize_serial() = 0;
-    ///
-    /// \brief write_data Writes data to the serial port.
-    /// \param bytes The date to write as am array of bytes.
-    /// \param length The number of bytes to write.
-    ///
-    virtual void write_data(const char* bytes, unsigned int length) = 0;
-    ///
-    /// \brief read_data Reads data from the serial port.
-    /// \param bytes An array of bytes for receiving the data into.
-    /// \param length The number of bytes to read.
-    ///
-    virtual void read_data(char* bytes, unsigned int length) = 0;
-    ///
-    /// \brief bytes_available Gets the number of bytes available to read from the serial port.
-    /// \return The number of bytes available to read.
-    ///
-    virtual unsigned int bytes_available() = 0;
-    ///
-    /// \brief flush_rx Flushes the RX buffer of the serial port.
-    ///
-    virtual void flush_rx() = 0;
-
 private:
     // CLASSES
     ///
@@ -145,7 +113,7 @@ private:
         /// \param packet The byte array containing the message.
         /// \param packet_size The size of the message in bytes.
         ///
-        message(const char* packet, unsigned int packet_size);
+        message(const unsigned char* packet, unsigned int packet_size);
         ~message();
 
         // METHODS
@@ -179,7 +147,7 @@ private:
         /// \brief p_packet Gets the byte array of the message packet.
         /// \return  The byte array of the message packet.
         ///
-        const char* p_packet() const;
+        const unsigned char* p_packet() const;
         ///
         /// \brief p_message_id Gets the ID of the message.
         /// \return The ID of the message.
@@ -191,7 +159,7 @@ private:
         ///
         /// \brief m_packet The byte array representing the message.
         ///
-        char* m_packet;
+        unsigned char* m_packet;
         ///
         /// \brief m_packet_size The size of the byte array representing the message.
         ///
@@ -202,7 +170,7 @@ private:
         /// \brief calculate_checksum Calculates the checksum of the message.
         /// \return The checksum of the message.
         ///
-        char calculate_checksum() const;
+        unsigned char calculate_checksum() const;
         ///
         /// \brief write_checksum Calculates and writes the checksum of the message.
         ///
@@ -224,6 +192,7 @@ private:
     };
 
     // VARIABLES
+    serial::Serial* m_serial_port;
     ///
     /// \brief m_current_data Stores the most current data read from the GPS.
     ///
@@ -232,6 +201,18 @@ private:
     /// \brief m_data_callback Stores the external callback to execute when new data is ready.
     ///
     std::function<void(data)> m_data_callback;
+
+    // SERIAL METHODS
+    ///
+    /// \brief initialize_serial Initializes the serial port of the driver.
+    /// \param port The serial port to use.
+    /// \param baud The baud rate to use.
+    ///
+    void initialize_serial(std::string port, unsigned int baud);
+    ///
+    /// \brief deinitialize_serial Deinitializes the serial port of the driver.
+    ///
+    void deinitialize_serial();
 
     // METHODS
     ///
@@ -258,23 +239,20 @@ private:
     void read_nmea();
     ///
     /// \brief validate_nmea_checksum Validates the checksum of an NMEA sentence.
-    /// \param packet The byte array containing the entire NMEA sentence, including CRLF.
-    /// \param length The length of the NMEA sentence, in bytes.
+    /// \param nmea The NMEA string to validate the checksum for.
     /// \return TRUE if the checksum is valid, otherwise FALSE.
     ///
-    bool validate_nmea_checksum(char* packet, unsigned int length);
+    bool validate_nmea_checksum(const std::string& nmea);
     ///
     /// \brief parse_gga Parses a NMEA GGA sentence and stores data into m_current_data.
-    /// \param nmea_string A byte array containing the NMEA string to parse.
-    /// \param length The length of the NMEA string in bytes.
+    /// \param nmea The NMEA string to parse.
     ///
-    void parse_gga(const char* nmea_string, unsigned short length);
+    void parse_gga(const std::string& nmea);
     ///
     /// \brief parse_gga Parses a NMEA GSA sentence and stores data into m_current_data.
-    /// \param nmea_string A byte array containing the NMEA string to parse.
-    /// \param length The length of the NMEA string in bytes.
+    /// \param nmea The NMEA string to parse.
     ///
-    void parse_gsa(const char* nmea_string, unsigned short length);
+    void parse_gsa(const std::string& nmea);
 };
 
 #endif // DRIVER_H

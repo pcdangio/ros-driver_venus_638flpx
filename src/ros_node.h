@@ -16,11 +16,10 @@ public:
     // CONSTRUCTORS
     ///
     /// \brief ros_node Initializes the ROS node.
-    /// \param driver The Venus 368FLPX driver instance.
     /// \param argc Number of main() args.
     /// \param argv The main() args.
     ///
-    ros_node(driver* driver, int argc, char **argv);
+    ros_node(int argc, char **argv);
     ~ros_node();
 
     // METHODS

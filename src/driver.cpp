@@ -7,11 +7,11 @@
 
 driver::driver()
 {
-
+    driver::m_serial_port = nullptr;
 }
 driver::~driver()
 {
-
+    driver::deinitialize_serial();
 }
 
 void driver::initialize(std::string port)
@@ -67,7 +67,7 @@ void driver::initialize(std::string port)
 void driver::deinitialize()
 {
     // Deinitialize serial interface.
-    deinitialize_serial();
+    driver::deinitialize_serial();
 }
 unsigned int driver::connect(std::string port)
 {
@@ -79,10 +79,10 @@ unsigned int driver::connect(std::string port)
     for(unsigned int b = 0; b < 4; b++)
     {
         // Initialize the serial connection.
-        initialize_serial(port, bauds[b]);
+        driver::initialize_serial(port, bauds[b]);
 
         // Flush the inputs.
-        flush_rx();
+        driver::m_serial_port->flushInput();
 
         // Attempt to set the power to normal mode and listen for ACK.
         // Can use empty fields since 0x0000 = normal mode written to SRAM.
@@ -96,7 +96,7 @@ unsigned int driver::connect(std::string port)
         else
         {
             // Communication failed on this baud rate. Deinitialize serial and continue search.
-            deinitialize_serial();
+            driver::deinitialize_serial();
         }
     }
 
@@ -104,6 +104,21 @@ unsigned int driver::connect(std::string port)
     std::stringstream message;
     message << "find_device: Could not find device on port " << port << " at any of the expected baud rates.";
     throw std::runtime_error(message.str());
+}
+
+// SERIAL METHODS
+void driver::initialize_serial(std::string port, unsigned int baud)
+{
+    driver::m_serial_port = new serial::Serial(port, baud, serial::Timeout::simpleTimeout(30));
+}
+void driver::deinitialize_serial()
+{
+    if(driver::m_serial_port)
+    {
+        driver::m_serial_port->close();
+        delete driver::m_serial_port;
+        driver::m_serial_port = nullptr;
+    }
 }
 
 void driver::set_data_callback(std::function<void (data)> callback)
@@ -117,7 +132,7 @@ void driver::spin()
 
 bool driver::write_message(const message &msg)
 {
-    write_data(msg.p_packet(), msg.p_packet_size());
+    driver::m_serial_port->write(msg.p_packet(), msg.p_packet_size());
 
     // Receive ACK or NAK.
     driver::message* ack_nak = driver::read_message();
@@ -143,11 +158,11 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     // If timeout occurs anywhere in the process, quit out and return nullptr instead of exception.
 
     // Specify expected header.
-    const char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
+    const unsigned char header[2] = {static_cast<unsigned char>(0xA0), static_cast<unsigned char>(0xA1)};
     // Create fifo for reading header and payload size.
-    char fifo[4] = {0, 0, 0, 0};
+    unsigned char fifo[4] = {0, 0, 0, 0};
     // Create packet for receiving message.
-    char* packet = nullptr;
+    unsigned char* packet = nullptr;
     unsigned int packet_size = 0;
     // Create flag for if header has been found.
     bool header_found = false;
@@ -156,13 +171,13 @@ driver::message* driver::read_message(unsigned int timeout_ms)
     while(true)
     {
         // If packet is nullptr, header hasn't been found yet. Read one byte at a time.
-        if(!header_found && bytes_available() > 0)
+        if(!header_found && driver::m_serial_port->available() > 0)
         {
             // Shift bytes to the left in the fifo.
             std::memcpy(&fifo[0], &fifo[1], 3);
 
             // Read new byte into the end of the fifo.
-            read_data(&fifo[3], 1);
+            driver::m_serial_port->read(&fifo[3], 1);
 
             // Check if header matches
             if(fifo[0] == header[0] && fifo[1] == header[1])
@@ -174,16 +189,16 @@ driver::message* driver::read_message(unsigned int timeout_ms)
                 // Calculate packet size.
                 packet_size = payload_length + 7;
                 // Instantiate a new packet for receiving the message.
-                packet = new char[packet_size];
+                packet = new unsigned char[packet_size];
                 // Copy the header and payload length from the fifo into the buffer.
                 std::memcpy(&packet[0], &fifo[0], 4);
             }
         }
         // If header has been found, block read the rest of the bytes if available.
-        else if(header_found && bytes_available() >= packet_size - 4)
+        else if(header_found && driver::m_serial_port->available() >= packet_size - 4)
         {
             // Read the rest of the bytes.
-            read_data(&packet[4], packet_size - 4);
+            driver::m_serial_port->read(&packet[4], packet_size - 4);
 
             // Create an output message.
             driver::message* msg = new driver::message(packet, packet_size);
@@ -230,193 +245,68 @@ driver::message* driver::read_message(unsigned int timeout_ms)
 }
 void driver::read_nmea()
 {
-    // Attempt to read and parse all available bytes.
+    // Attempt to read all nmea strings until timeout.
+    std::vector<std::string> nmea = driver::m_serial_port->readlines(1024, "\r\n");
 
-    // Create RX and Parse buffers.
-    const unsigned short buffer_size = 100;
-    char rx_buffer[buffer_size];
-    char pa_buffer[buffer_size];
-    // Create tracker for current position in the rx_buffer and the number of bytes actually read.
-    unsigned short rx_pos = 0;
-    unsigned short rx_end = 0;
-    // Create tracker for current position in the pa_buffer.
-    unsigned short pa_pos = 0;
-    // Create tracker for which byte is being searched for.
-    enum search_byte_type
+    // Iterate over read messages.
+    for(unsigned int i = 0; i < nmea.size(); i++)
     {
-        header_1 = 0,   // $
-        header_2 = 1,   // G
-        header_3 = 2,   // P
-        footer_1 = 3,   // 0x0D (CR)
-        footer_2 = 4    // 0x0A (LF)
-    };
-    search_byte_type search_byte = header_1;
-
-    // Loop while bytes are available to parse either in rx_buffer or the serial buffer.
-    while(rx_pos < rx_end || bytes_available())
-    {
-        // First check if rx buffer needs to be refereshed.
-        if(rx_pos == rx_end)
+        // Trim any leading bytes not equal to the header, $GP
+        unsigned long start_index = nmea.at(i).find("$GP");
+        if(start_index != std::string::npos)
         {
-            // Read more bytes into the buffer.
-            unsigned short n_bytes = static_cast<unsigned short>(std::min(static_cast<unsigned int>(buffer_size), bytes_available()));
-            read_data(rx_buffer, n_bytes);
-            // Update rx_pos and rx_len.
-            rx_pos = 0;
-            rx_end = n_bytes; // Use length because rx_pos becoming rx_len means rx_pos is an invalid index.
+            // Trim the beginning of the string.
+            nmea[i].erase(0, start_index);
+        }
+        else
+        {
+            // Header not found.
+            continue;
         }
 
-        switch(search_byte)
+        // Validate the message's checksum.
+        if(driver::validate_nmea_checksum(nmea.at(i)))
         {
-        case header_1:
-        {
-            // Scan rx_buffer for the 3-character $GP header.
-            for( ; rx_pos < rx_end; rx_pos++)
+            // Determine the message type.
+            std::string message_type = nmea.at(i).substr(3, 3);
+            if(message_type.compare("GGA") == 0)
             {
-                // Check current position for header.
-                if(rx_buffer[rx_pos] == '$')
+                driver::parse_gga(nmea.at(i));
+            }
+            else if(message_type.compare("GSA") == 0)
+            {
+                driver::parse_gsa(nmea.at(i));
+
+                // This is the last message containing needed data.
+                // Raise the data ready callback and pass in the current data.
+                if(driver::m_data_callback)
                 {
-                    // Header 1 has been found.
-                    // Signal next byte to search for.
-                    search_byte = header_2;
-                    // Reset pa_pos and start writing to the beginning.
-                    pa_pos = 0;
-                    pa_buffer[pa_pos++] = '$';
-                    // Break for loop to continue.
-                    // rx_pos must be manually incremented here since for loop is being broken.
-                    rx_pos++;
-                    break;
+                    driver::m_data_callback(driver::m_current_data);
                 }
             }
-            // If this point is reached and header_1_found is false, then rx_pos == rx_end,
-            // rx_buffer will refresh, and will continue searching for header_1.
-            break;
         }
-        case header_2:
-        {
-            // Check the next position for header 2.
-            // Make sure to post-increment rx_pos.
-            if(rx_buffer[rx_pos++] == 'G')
-            {
-                // Header 2 has been found.
-                // Signal next byte to search for.
-                search_byte = header_3;
-                // Write byte to the pa_buffer.
-                pa_buffer[pa_pos++]= 'G';
-            }
-            else
-            {
-                // Header 2 was not found.  Reset to Header 1.
-                search_byte = header_1;
-            }
-            break;
-        }
-        case header_3:
-        {
-            // Check the next position for header 3.
-            // Make sure to post-increment rx_pos.
-            if(rx_buffer[rx_pos++] == 'P')
-            {
-                // Header 3 has been found.
-                // Signal next byte to search for.
-                search_byte = footer_1;
-                // Write byte to the pa_buffer.
-                pa_buffer[pa_pos++]= 'P';
-            }
-            else
-            {
-                // Header 3 was not found.  Reset to Header 1.
-                search_byte = header_1;
-            }
-            break;
-        }
-        case footer_1:
-        {
-            // Scan rx_buffer for footer 1 while copying scanned bytes into the parse buffer.
-            for( ; rx_pos < rx_end; rx_pos++)
-            {
-                // Copy scanned byte into the buffer.
-                pa_buffer[pa_pos++] = rx_buffer[rx_pos];
-                // Check if the scanned byte is footer 1.
-                if(rx_buffer[rx_pos] == 0x0D)
-                {
-                    // Footer 1 has been found.
-                    // Signal next byte to search for.
-                    search_byte = footer_2;
-                    // Break the for loop.
-                    // rx_pos must be manually incremented here since for loop is being broken.
-                    rx_pos++;
-                    break;
-                }
-            }
-            break;
-        }
-        case footer_2:
-        {
-            // Check the next position for footer 2.
-            // Make sure to post-increment rx_pos.
-            if(rx_buffer[rx_pos++] == 0x0A)
-            {
-                // Footer 2 has been found.
-                // Write byte to the pa_buffer.
-                pa_buffer[pa_pos++]= 0x0A;
-
-                // pa_buffer now contains a full message, and pa_pos is it's length.
-                // Validate the message's checksum.
-                if(driver::validate_nmea_checksum(pa_buffer, pa_pos))
-                {
-                    // Determine message type.
-                    std::string message_type(&pa_buffer[3], 3);
-                    if(message_type.compare("GGA") == 0)
-                    {
-                        driver::parse_gga(pa_buffer, pa_pos);
-                    }
-                    else if(message_type.compare("GSA") == 0)
-                    {
-                        driver::parse_gsa(pa_buffer, pa_pos);
-
-                        // This is the last message containing needed data.
-                        // Raise the data ready callback and pass in the current data.
-                        if(driver::m_data_callback)
-                        {
-                            driver::m_data_callback(driver::m_current_data);
-                        }
-                    }
-                    // Don't do anything with messages that don't have an expected type.
-
-
-                }
-                // If checksum mismatch, don't do anything with the message and just continue.
-            }
-            // Always reset to header 1 at this point, since either a full message was read, or a partial message failed.
-            search_byte = header_1;
-            break;
-        }
-        }
-
-        // Sleep to allow more bytes to come in.
-        usleep(5000);
+        // If checksum mismatch, don't do anything with the message and just continue.
     }
 }
-bool driver::validate_nmea_checksum(char *packet, unsigned int length)
+bool driver::validate_nmea_checksum(const std::string &nmea)
 {
-    char expected_checksum = 0;
-    for(unsigned int i = 1; i < length - 5; i++)
+    unsigned char expected_checksum = 0;
+    for(unsigned int i = 1; i < nmea.length() - 5; i++)
     {
-        expected_checksum ^= packet[i];
+        expected_checksum ^= nmea.at(i);
     }
     // Convert packet's hex chars to an actual hex value using streams.
-    std::stringstream packet_checksum_str;
-    packet_checksum_str << packet[length - 4] << packet[length - 3];
-    unsigned short packet_checksum;
-    packet_checksum_str >> std::hex >> packet_checksum;
+    std::stringstream checksum_stream;
+    checksum_stream << nmea.substr(nmea.length() - 4, 2);
+    unsigned short actual_checksum;
+    checksum_stream >> std::hex >> actual_checksum;
     // Compare checksums.
-    return packet_checksum == static_cast<unsigned short>(expected_checksum);
+    return actual_checksum == static_cast<unsigned short>(expected_checksum);
 }
-void driver::parse_gga(const char *nmea_string, unsigned short length)
+void driver::parse_gga(const std::string &nmea)
 {
-    // Remove $GPGAA, from the front and */checksum/CR/LF from end.
-    std::string data(&nmea_string[7], length - 12);
+    // Remove $GPGGA, from the front and */checksum from end.
+    std::string data = nmea.substr(7, nmea.length() - 12);
 
     // Parse through each comma separated field.
     // There are 14 data fields in GGA.
@@ -477,10 +367,10 @@ void driver::parse_gga(const char *nmea_string, unsigned short length)
 
     // FIELD 10-13: Unused.
 }
-void driver::parse_gsa(const char *nmea_string, unsigned short length)
+void driver::parse_gsa(const std::string &nmea)
 {
-    // Remove $GPGSA, from the front and */checksum/CR/LF from end.
-    std::string data(&nmea_string[7], length - 12);
+    // Remove $GPGSA, from the front and */checksum from end.
+    std::string data = nmea.substr(7, nmea.length() - 12);
 
     // Parse through each comma separated field.
     // There are 17 data fields in GSA.
@@ -520,7 +410,7 @@ driver::message::message(id_types message_id, unsigned int data_size)
 {
     // Create an packet with empty data bytes.
     driver::message::m_packet_size = 8 + data_size;
-    driver::message::m_packet = new char[driver::message::m_packet_size];
+    driver::message::m_packet = new unsigned char[driver::message::m_packet_size];
 
     // Calculate payload length and place in big endian format.
     unsigned short payload_length = htobe16(static_cast<unsigned short>(data_size + 1));
@@ -528,12 +418,12 @@ driver::message::message(id_types message_id, unsigned int data_size)
     // Set appropriate fields.
     unsigned int index = 0;
     // Set header.
-    driver::message::m_packet[index++] = static_cast<char>(0xA0);
-    driver::message::m_packet[index++] = static_cast<char>(0xA1);
+    driver::message::m_packet[index++] = static_cast<unsigned char>(0xA0);
+    driver::message::m_packet[index++] = static_cast<unsigned char>(0xA1);
     // Write payload length field
     std::memcpy(&driver::message::m_packet[index], &payload_length, 2); index += 2;
     // Write message id.
-    driver::message::m_packet[index++] = static_cast<char>(message_id);
+    driver::message::m_packet[index++] = static_cast<unsigned char>(message_id);
     // Write zeros to the data field.
     for(unsigned int i = 0; i < data_size; i++)
     {
@@ -542,14 +432,14 @@ driver::message::message(id_types message_id, unsigned int data_size)
     // Write the checksum.
     driver::message::write_checksum(); index++;
     // Write CRLF footer.
-    driver::message::m_packet[index++] = static_cast<char>(0x0D);
-    driver::message::m_packet[index] = static_cast<char>(0x0A);
+    driver::message::m_packet[index++] = static_cast<unsigned char>(0x0D);
+    driver::message::m_packet[index] = static_cast<unsigned char>(0x0A);
 }
-driver::message::message(const char *packet, unsigned int packet_size)
+driver::message::message(const unsigned char *packet, unsigned int packet_size)
 {
     // Create packet byte array and store size.
     driver::message::m_packet_size = packet_size;
-    driver::message::m_packet = new char[packet_size];
+    driver::message::m_packet = new unsigned char[packet_size];
 
     // Deep copy packet.
     for(unsigned int i = 0; i < packet_size; i++)
@@ -594,7 +484,7 @@ void driver::message::write_field(unsigned int address, unsigned int size, void 
     {
     case 1:
     {
-        driver::message::m_packet[packet_address] = *static_cast<char*>(field);
+        driver::message::m_packet[packet_address] = *static_cast<unsigned char*>(field);
         break;
     }
     case 2:
@@ -697,9 +587,9 @@ void driver::message::read_field(unsigned int address, unsigned int size, void *
     }
 }
 
-char driver::message::calculate_checksum() const
+unsigned char driver::message::calculate_checksum() const
 {
-    char checksum = 0;
+    unsigned char checksum = 0;
     for(unsigned int i = 4; i < driver::message::m_packet_size - 3; i++)
     {
         checksum ^= driver::message::m_packet[i];
@@ -719,7 +609,7 @@ unsigned int driver::message::p_packet_size() const
 {
     return driver::message::m_packet_size;
 }
-const char* driver::message::p_packet() const
+const unsigned char* driver::message::p_packet() const
 {
     return driver::message::m_packet;
 }

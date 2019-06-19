@@ -13,7 +13,7 @@ The source code is released under a [MIT license](LICENSE).
 **Author: Paul D'Angio<br />
 Maintainer: Paul D'Angio, pcdangio@gmail.com**
 
-The driver_mpu9250 package has been tested under [ROS] Melodic and Ubuntu 18.04. This is research code, expect that it changes often and any fitness for a particular purpose is disclaimed.
+The driver_venus_638flpx package has been tested under [ROS] Melodic and Ubuntu 18.04. This is research code, expect that it changes often and any fitness for a particular purpose is disclaimed.
 
 ## Installation
 
@@ -53,14 +53,17 @@ A Raspberry Pi driver for [638FLPx].  Ensure that the pigpio daemon is running b
 
 #### Published Topics
 * **`gps/position`** ([sensor_msgs/NavSatFix](http://docs.ros.org/api/sensor_msgs/html/msg/NavSatFix.html))
+
         The GPS position measured by the sensor.
+
 * **`gps/time`** ([sensor_msgs/TimeReference](http://docs.ros.org/api/sensor_msgs/html/msg/TimeReference.html))
+
         The current time of day in UTC time.
 
 
 #### Parameters
 
-* **`~/serial_port`** (string, default: dev/ttyAMA0)
+* **`~/serial_port`** (string, default: /dev/ttyAMA0)
 
         The serial port connected to the sensor.
 
