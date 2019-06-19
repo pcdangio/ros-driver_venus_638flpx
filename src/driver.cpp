@@ -253,10 +253,15 @@ void driver::read_nmea()
     {
         // Trim any leading bytes not equal to the header, $GP
         unsigned long start_index = nmea.at(i).find("$GP");
-        if(start_index > 0)
+        if(start_index != std::string::npos)
         {
             // Trim the beginning of the string.
             nmea[i].erase(0, start_index);
+        }
+        else
+        {
+            // Header not found.
+            continue;
         }
 
         // Validate the message's checksum.
@@ -286,13 +291,13 @@ void driver::read_nmea()
 bool driver::validate_nmea_checksum(const std::string &nmea)
 {
     unsigned char expected_checksum = 0;
-    for(unsigned int i = 1; i < nmea.length() - 3; i++)
+    for(unsigned int i = 1; i < nmea.length() - 5; i++)
     {
         expected_checksum ^= nmea.at(i);
     }
     // Convert packet's hex chars to an actual hex value using streams.
     std::stringstream checksum_stream;
-    checksum_stream << nmea.substr(nmea.length() - 2, 2);
+    checksum_stream << nmea.substr(nmea.length() - 4, 2);
     unsigned short actual_checksum;
     checksum_stream >> std::hex >> actual_checksum;
     // Compare checksums.
@@ -301,7 +306,7 @@ bool driver::validate_nmea_checksum(const std::string &nmea)
 void driver::parse_gga(const std::string &nmea)
 {
     // Remove $GPGGA, from the front and */checksum from end.
-    std::string data = nmea.substr(7, nmea.length() - 10);
+    std::string data = nmea.substr(7, nmea.length() - 12);
 
     // Parse through each comma separated field.
     // There are 14 data fields in GGA.
@@ -365,7 +370,7 @@ void driver::parse_gga(const std::string &nmea)
 void driver::parse_gsa(const std::string &nmea)
 {
     // Remove $GPGSA, from the front and */checksum from end.
-    std::string data = nmea.substr(7, nmea.length() - 10);
+    std::string data = nmea.substr(7, nmea.length() - 12);
 
     // Parse through each comma separated field.
     // There are 17 data fields in GSA.
