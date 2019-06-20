@@ -57,10 +57,6 @@ private:
 
     // METHODS
     ///
-    /// \brief deinitialize_driver Deinitializes the driver.
-    ///
-    void deinitialize_driver();
-    ///
     /// \brief data_callback The callback for processing new GPS data.
     /// \param data The most recent GPS data.
     ///

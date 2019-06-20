@@ -65,10 +65,6 @@ public:
     ///
     void initialize(std::string port);
     ///
-    /// \brief deinitialize Deinitialies the Venus GPS and the driver.
-    ///
-    void deinitialize();
-    ///
     /// \brief set_data_callback Attaches a callback to handle new data.
     /// \param callback The callback to use when new data is ready.
     ///

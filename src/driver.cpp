@@ -64,11 +64,6 @@ void driver::initialize(std::string port)
         throw std::runtime_error("initialize: Could not configure update rate.");
     }
 }
-void driver::deinitialize()
-{
-    // Deinitialize serial interface.
-    driver::deinitialize_serial();
-}
 unsigned int driver::connect(std::string port)
 {
     // Loop through known baud rates to check for a valid return.

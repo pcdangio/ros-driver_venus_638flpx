@@ -44,8 +44,6 @@ ros_node::ros_node(int argc, char **argv)
     catch (std::exception& e)
     {
         ROS_FATAL_STREAM(e.what());
-        // Deinitialize driver.
-        ros_node::deinitialize_driver();
         // Quit the node.
         ros::shutdown();
     }
@@ -71,23 +69,8 @@ void ros_node::spin()
         // Loop.
         ros_node::m_scan_rate->sleep();
     }
-
-    // Deinitialize driver.
-    ros_node::deinitialize_driver();
 }
 
-void ros_node::deinitialize_driver()
-{
-    try
-    {
-        ros_node::m_driver->deinitialize();
-        ROS_INFO_STREAM("Driver successfully deinitialized.");
-    }
-    catch (std::exception& e)
-    {
-        ROS_FATAL_STREAM(e.what());
-    }
-}
 
 void ros_node::data_callback(driver::data data)
 {
