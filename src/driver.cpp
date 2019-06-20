@@ -1,9 +1,7 @@
 #include "driver.h"
 
 #include <sstream>
-#include <chrono>
 #include <unistd.h>
-#include <cstring>
 
 driver::driver()
 {
@@ -104,7 +102,7 @@ unsigned int driver::connect(std::string port)
 // SERIAL METHODS
 void driver::initialize_serial(std::string port, unsigned int baud)
 {
-    driver::m_serial_port = new serial::Serial(port, baud, serial::Timeout::simpleTimeout(30));
+    driver::m_serial_port = new serial::Serial(port, baud, serial::Timeout::simpleTimeout(50));
 }
 void driver::deinitialize_serial()
 {
@@ -136,7 +134,10 @@ bool driver::write_message(const message &msg)
     driver::message* ack_nak = driver::read_message();
     if(ack_nak)
     {
-        bool ack = ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK;
+        // Verify it is an ACK message with a matching message ID.
+        bool ack =
+                ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK &&
+                static_cast<driver::message::id_types>(ack_nak->read_field<unsigned char>(0)) == msg.p_message_id();
         delete ack_nak;
         return ack;
     }
@@ -146,38 +147,61 @@ bool driver::write_message(const message &msg)
         return false;
     }
 }
+
 driver::message* driver::read_message()
 {
-    // Read the next string.
-    std::string data = driver::m_serial_port->readline(128, "\r\n");
-
-    // Find the 0xA0 and 0xA1 header.
-    char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
-    unsigned long start_index = data.find(header, 0, 2);
-
-    if(start_index != std::string::npos)
+    // Keep reading strings until the first control message is found or times out.
+    // This will always ignore and throw away $ stream messages since control messages are vital.
+    while(true)
     {
-        // Trim out any leading characters.
-        data.erase(0, start_index);
+        std::string data = driver::m_serial_port->readline(128, "\r\n");
 
-        // Check data length is at least 7 bytes.  Header (2), Payload Length (2), Checksum (1), CRLF (2)
-        if(data.size() < 7)
+        // Check if timeout.
+        if(data.size() == 0)
         {
             return nullptr;
         }
 
-        // Create an output message.
-        driver::message* msg = new driver::message(data);
+        // Find the 0xA0 and 0xA1 header.
+        char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
+        unsigned long start_index = data.find(header, 0, 2);
 
-        // Validate the checksum.
-        if(msg->validate_checksum())
+        if(start_index != std::string::npos)
         {
+            // Header found.
+            // Trim out any leading characters.
+            data.erase(0, start_index);
+
+            // Check message length is at least 7 bytes.  Header (2), Payload Length (2), Checksum (1), CRLF (2)
+            if(data.size() < 7)
+            {
+                return nullptr;
+            }
+
+            // Create an output message.
+            driver::message* msg = new driver::message(data);
+
+            // Validate the checksum.
+            if(msg->validate_checksum() == false)
+            {
+                delete msg;
+                return nullptr;
+            }
+
+            // Check if blank ACK/NAK message.
+            if(msg->p_message_id() == driver::message::id_types::RESPONSE_ACK || msg->p_message_id() == driver::message::id_types::RESPONSE_NAK)
+            {
+                if(msg->read_field<unsigned char>(0) == 0x00)
+                {
+                    delete msg;
+                    return nullptr;
+                }
+            }
+
+            // If this point is reached, a valid message has been received.
             return msg;
         }
     }
-
-    // If this point reached, either no message was found or an invalid checksum occured.
-    return nullptr;
 }
 void driver::read_nmea()
 {
