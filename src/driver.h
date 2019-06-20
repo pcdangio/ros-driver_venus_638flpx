@@ -109,11 +109,10 @@ private:
         ///
         message(id_types message_id, unsigned int data_size);
         ///
-        /// \brief message Loads a message from a byte array.
-        /// \param packet The byte array containing the message.
-        /// \param packet_size The size of the message in bytes.
+        /// \brief message Loads a message from a string read from the serial port.
+        /// \param message The string containing the received message.
         ///
-        message(const unsigned char* packet, unsigned int packet_size);
+        message(std::string message);
         ~message();
 
         // METHODS
@@ -229,10 +228,9 @@ private:
     bool write_message(const message& msg);
     ///
     /// \brief read_message Reads a message from the Venus GPS.
-    /// \param timeout_ms OPTIONAL The timeout of the read operation in milliseconds (defaults to 100ms).
     /// \return A pointer to a successfully read message, otherwise NULLPTR.
     ///
-    message* read_message(unsigned int timeout_ms = 100);
+    message* read_message();
     ///
     /// \brief read_nmea Reads all available NMEA data from the serial port.
     ///
