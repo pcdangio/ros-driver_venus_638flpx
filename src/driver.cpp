@@ -160,6 +160,12 @@ driver::message* driver::read_message()
         // Trim out any leading characters.
         data.erase(0, start_index);
 
+        // Check data length is at least 7 bytes.  Header (2), Payload Length (2), Checksum (1), CRLF (2)
+        if(data.size() < 7)
+        {
+            return nullptr;
+        }
+
         // Create an output message.
         driver::message* msg = new driver::message(data);
 
@@ -365,9 +371,10 @@ driver::message::message(id_types message_id, unsigned int data_size)
     driver::message::m_packet[index++] = static_cast<unsigned char>(0x0D);
     driver::message::m_packet[index] = static_cast<unsigned char>(0x0A);
 }
-driver::message::message(std::string message)
+driver::message::message(const std::string& message)
 {
     // Deep copy the message bytes.
+    driver::message::m_packet_size = static_cast<unsigned int>(message.size());
     const char* bytes = message.c_str();
     for(unsigned int i = 0; i < message.size(); i++)
     {

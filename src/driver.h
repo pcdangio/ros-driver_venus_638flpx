@@ -112,7 +112,7 @@ private:
         /// \brief message Loads a message from a string read from the serial port.
         /// \param message The string containing the received message.
         ///
-        message(std::string message);
+        message(const std::string& message);
         ~message();
 
         // METHODS
