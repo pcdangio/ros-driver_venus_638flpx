@@ -375,6 +375,8 @@ driver::message::message(const std::string& message)
 {
     // Deep copy the message bytes.
     driver::message::m_packet_size = static_cast<unsigned int>(message.size());
+    driver::message::m_packet = new unsigned char[driver::message::m_packet_size];
+
     const char* bytes = message.c_str();
     for(unsigned int i = 0; i < message.size(); i++)
     {
