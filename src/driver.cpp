@@ -115,7 +115,10 @@ void driver::deinitialize_serial()
 {
     if(driver::m_serial_port)
     {
-        driver::m_serial_port->close();
+        if(driver::m_serial_port->isOpen())
+        {
+            driver::m_serial_port->close();
+        }
         delete driver::m_serial_port;
         driver::m_serial_port = nullptr;
     }
@@ -138,7 +141,9 @@ bool driver::write_message(const message &msg)
     driver::message* ack_nak = driver::read_message();
     if(ack_nak)
     {
-        return ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK;
+        bool ack = ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK;
+        delete ack_nak;
+        return ack;
     }
     else
     {
