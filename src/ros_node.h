@@ -47,9 +47,9 @@ private:
     ///
     ros::Publisher m_time_publisher;
     ///
-    /// \brief m_scan_rate The rate at which to scan for NMEA messages.
+    /// \brief m_read_rate The rate at which to scan for NMEA messages.
     ///
-    ros::Rate* m_scan_rate;
+    ros::Rate* m_read_rate;
     ///
     /// \brief m_uere Stores the User Equivalent Range Error (UERE) for the sensor.
     ///
