@@ -4,7 +4,7 @@
 
 This package includes driver software for the SkyTraq Venus [638FLPx] GPS Receiver.
 
-**Keywords:** skytraq venus 638flpx gps driver raspberry_pi
+**Keywords:** skytraq venus 638flpx gps driver
 
 ### License
 
@@ -22,8 +22,8 @@ The driver_venus_638flpx package has been tested under [ROS] Melodic and Ubuntu 
 #### Dependencies
 
 - [Robot Operating System (ROS)](http://wiki.ros.org) (middleware for robotics)
+- [serial](http://wiki.ros.org/serial) (ROS serial package)
 - [sensor_msgs](http://wiki.ros.org/sensor_msgs) (ROS sensor_msgs)
-- [pigpio](http://abyz.me.uk/rpi/pigpio/) (Raspberry PI I/O)
 
 #### Building
 
@@ -36,19 +36,15 @@ To build from source, clone the latest version from this repository into your ca
 
 ## Usage
 
-Run any of the driver nodes with (where xxx is the driver type):
+Run the driver with the following command:
 
-        rosrun driver_venus_638flpx xxx_node
-
-For example, to run the node using a driver for a Raspberry Pi:
-
-        rosrun driver_venus_638flpx rpi_node
+        rosrun driver_venus_638flpx node
 
 ## Nodes
 
-### rpi_node
+### node
 
-A Raspberry Pi driver for [638FLPx].  Ensure that the pigpio daemon is running before starting this node.
+A driver for interacting with the Venus [638FLPx] GPS.  Enables configuration and reading of NMEA data.
 
 
 #### Published Topics
@@ -61,13 +57,17 @@ A Raspberry Pi driver for [638FLPx].  Ensure that the pigpio daemon is running b
         The current time of day in UTC time.
 
 
-#### Parameters
+#### Runtime Parameters
 
 * **`~/serial_port`** (string, default: /dev/ttyAMA0)
 
         The serial port connected to the sensor.
 
-* **`~/scan_rate`** (double, default: 50)
+* **`~/baud_rate`** (uint32, default: 115200)
+
+        The baud rate to use for serial communication with the sensor.
+
+* **`~/read_rate`** (double, default: 50)
 
         The rate at which to scan the serial port for new NMEA messages.
 
@@ -75,6 +75,30 @@ A Raspberry Pi driver for [638FLPx].  Ensure that the pigpio daemon is running b
 
         The User Equivalent Range Error (UERE) representing the total pseudorange error budget.  This is typically 6.74 for C/A, and 6.0 for P(Y).
 
+#### Configuration Parameters
+
+These parameters should only be changed when needed, and not set prior to every run.  These parameters will be updated in the sensor's flash memory and will be preserved over power cycles.
+
+* **`~/update_baud`** (int, default: -1)
+
+        Changes the baud rate of the Venus GPS using an enumeration.  Possible values are:
+        0 = 4800 bps
+        1 = 9600 bps
+        3 = 38400 bps
+        5 = 115200 bps
+        The default value of -1 instructs the node to ignore updating the baud rate.
+
+* **`~/update_rate`** (int, default: -1)
+
+        Changes the position update rate of the Venus GPS using an enumeration.  Possible values are:
+        1 = 1Hz
+        2 = 2Hz
+        4 = 4Hz
+        5 = 5Hz
+        8 = 8Hz
+        10 = 10Hz
+        20 = 20Hz
+        The default value of -1 instructs the node to ignore updating the update rate.
 
 ## Bugs & Feature Requests
 
