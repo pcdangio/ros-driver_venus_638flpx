@@ -67,9 +67,9 @@ A driver for interacting with the Venus [638FLPx] GPS.  Enables configuration an
 
         The baud rate to use for serial communication with the sensor.
 
-* **`~/read_rate`** (double, default: 50)
+* **`~/scan_rate`** (double, default: 50)
 
-        The rate at which to scan the serial port for new NMEA messages.
+        The rate in Hz at which to scan the serial port for new NMEA messages.
 
 * **`~/uere`** (double, default: 6.74)
 

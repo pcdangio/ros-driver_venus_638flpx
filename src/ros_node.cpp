@@ -19,8 +19,8 @@ ros_node::ros_node(int argc, char **argv)
     private_node.param<std::string>("serial_port", param_serial_port, "/dev/ttyAMA0");
     int param_baud_rate;
     private_node.param<int>("baud_rate", param_baud_rate, 115200);
-    double param_read_rate;
-    private_node.param<double>("read_rate", param_read_rate, 50.0);
+    double param_scan_rate;
+    private_node.param<double>("scan_rate", param_scan_rate, 50.0);
     private_node.param<double>("uere", ros_node::m_uere, 6.74);
 
     // Read configure parameters.
@@ -34,7 +34,7 @@ ros_node::ros_node(int argc, char **argv)
     ros_node::m_time_publisher = ros_node::m_node->advertise<sensor_msgs::TimeReference>("gps/time", 1);
 
     // Initialize ros node members.
-    ros_node::m_read_rate = new ros::Rate(param_read_rate);
+    ros_node::m_scan_rate = new ros::Rate(param_scan_rate);
 
     // Initialize driver.
     ros_node::m_driver = new driver(param_serial_port, static_cast<unsigned int>(param_baud_rate));
@@ -114,7 +114,7 @@ ros_node::ros_node(int argc, char **argv)
 ros_node::~ros_node()
 {
     // Clean up resources.
-    delete ros_node::m_read_rate;
+    delete ros_node::m_scan_rate;
     delete ros_node::m_node;
     delete ros_node::m_driver;
 }
@@ -131,7 +131,7 @@ void ros_node::spin()
         ros::spinOnce();
 
         // Loop.
-        ros_node::m_read_rate->sleep();
+        ros_node::m_scan_rate->sleep();
     }
 }
 
