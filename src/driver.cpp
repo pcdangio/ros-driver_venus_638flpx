@@ -12,7 +12,7 @@ driver::driver(std::string port, unsigned int baud)
 
     // Use an inter-byte timeout with a long full timeout.
     // Streams will be coming in fast enough where we want readLines to timeout at the end of each CRLF.
-    serial::Timeout timeout(5, 100);
+    serial::Timeout timeout(5, 100, 0, 100, 0);
     driver::m_serial_port->setTimeout(timeout);
 
     // Flush the input/output buffers.
