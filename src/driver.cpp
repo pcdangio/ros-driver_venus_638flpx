@@ -105,19 +105,16 @@ void driver::spin()
     // Handles bulk reading and handling of stream messages.
     // Control messages are ignored in this spin method.
 
-    // Read all available data strings until interbyte timeout reached.
-    std::vector<std::string> data = driver::m_serial_port->readlines(256, "\r\n");
-
-    // Iterate over read messages.
-    for(unsigned int i = 0; i < data.size(); i++)
+    // Read one line at a time, otherwise serial port timeout returns partially completed lines.
+    while(driver::m_serial_port->available())
     {
-        std::string& current_data = data.at(i);
+        std::string data = driver::m_serial_port->readline(256, "\r\n");
 
         // Look for the NMEA stream header: $GP
-        if(driver::find_header("$GP", current_data))
+        if(driver::find_header("$GP", data))
         {
             // Header has been found and string is trimmed.
-            driver::handle_stream(current_data);
+            driver::handle_stream(data);
         }
     }
 }
