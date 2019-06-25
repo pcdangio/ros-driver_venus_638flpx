@@ -9,11 +9,36 @@
 #include <functional>
 
 ///
-/// \brief An extendable driver class for the Venus 638FLX GPS.
+/// \brief A driver for the Venus 638FLX GPS.
 ///
 class driver
 {
 public:
+    // ENUMERATIONS
+    ///
+    /// \brief The allowable baud rates for the Venus GPS.
+    ///
+    enum class baud_rates
+    {
+        bps_4800 = 0x00,    ///< 4800bps
+        bps_9600 = 0x01,    ///< 9600bps
+        bps_38400 = 0x03,   ///< 38400bps
+        bps_115200 = 0x05   ///< 115200bps
+    };
+    ///
+    /// \brief The allowable update rates for the Venus GPS.
+    ///
+    enum class update_rates
+    {
+        hz_1 = 1,       /// 1Hz
+        hz_2 = 2,       /// 2Hz
+        hz_4 = 4,       /// 4Hz
+        hz_5 = 5,       /// 5Hz
+        hz_8 = 8,       /// 8Hz
+        hz_10 = 10,     /// 10Hz
+        hz_20 = 20      /// 20Hz
+    };
+
     // CLASSES
     ///
     /// \brief Contains all relevant sensed GPS data.
@@ -53,26 +78,45 @@ public:
 
     // CONSTRUCTORS
     ///
-    /// \brief driver Creates a new driver instance.
-    ///
-    driver();
-    virtual ~driver();
-
-    // METHODS
-    ///
-    /// \brief initialize Initializes the driver and Venus GPS.
+    /// \brief driver Initializes a new driver instance.
     /// \param port The serial port connected to the Venus GPS.
+    /// \param baud The baud rate of the serial connection.
     ///
-    void initialize(std::string port);
+    driver(std::string port, unsigned int baud);
+    ~driver();
+
+    // CONFIGURATION METHODS
+    ///
+    /// \brief set_baud Updates the baud rate of the Venus GPS in flash memory.
+    /// \param baud The new baud rate to use.
+    /// \return TRUE if ACKed, FALSE if NAKed or no response.
+    ///
+    bool set_baud(baud_rates baud);
+    ///
+    /// \brief set_power Updates the power status of the Venus GPS in SRAM.
+    /// \param power_on TRUE to power on, FALSE to enter low power mode.
+    /// \return TRUE if ACKed, FALSE if NAKed or no response.
+    ///
+    bool set_power(bool power_on);
+    ///
+    /// \brief set_update_rate Updates the position rate of the Venus GPS in flash memory.
+    /// \param rate The new update rate to use.
+    /// \return TRUE if ACKed, FALSE if NAKed or no response.
+    ///
+    bool set_update_rate(update_rates rate);
+
+    // SPIN METHODS
+    ///
+    /// \brief spin Reads and handles all available stream messages currently in the serial buffer.
+    ///
+    void spin();
+
+    // CALLBACK ATTACHMENT
     ///
     /// \brief set_data_callback Attaches a callback to handle new data.
     /// \param callback The callback to use when new data is ready.
     ///
     void set_data_callback(std::function<void(data)> callback);
-    ///
-    /// \brief spin Spins a single iteration of the driver.
-    ///
-    void spin();
 
 private:
     // CLASSES
@@ -187,6 +231,9 @@ private:
     };
 
     // VARIABLES
+    ///
+    /// \brief m_serial_port The serial port used for communication with the GPS.
+    ///
     serial::Serial* m_serial_port;
     ///
     /// \brief m_current_data Stores the most current data read from the GPS.
@@ -197,46 +244,52 @@ private:
     ///
     std::function<void(data)> m_data_callback;
 
-    // SERIAL METHODS
-    ///
-    /// \brief initialize_serial Initializes the serial port of the driver.
-    /// \param port The serial port to use.
-    /// \param baud The baud rate to use.
-    ///
-    void initialize_serial(std::string port, unsigned int baud);
-    ///
-    /// \brief deinitialize_serial Deinitializes the serial port of the driver.
-    ///
-    void deinitialize_serial();
-
-    // METHODS
-    ///
-    /// \brief connect Automated method for connecting to the Venus GPS when the baud rate is unknown.
-    /// \param port The serial port to connect to.
-    /// \return The baud rate of the successful connection.
-    ///
-    unsigned int connect(std::string port);
+    // IO METHODS
     ///
     /// \brief write_message Writes a message to the Venus GPS.
     /// \param msg The message to write.
-    /// \return TRUE if message acknowledged by Venus GPS, otherwise FALSE.
+    /// \return TRUE if ACKed, FALSE if NAKed or no response.
     ///
     bool write_message(const message& msg);
     ///
     /// \brief read_message Reads a message from the Venus GPS.
-    /// \return A pointer to a successfully read message, otherwise NULLPTR.
+    /// \param id The ID of the message to read.
+    /// \return If the message was found before timeout, returns a pointer to the message.
+    /// Otherwise, returns a nullptr.
+    /// \note If ID is set to ACK or NAK, the method will search for either ACK or NAK.
     ///
-    message* read_message();
+    message* read_message(message::id_types id);
+
+    // SPIN METHODS
     ///
-    /// \brief read_nmea Reads all available NMEA data from the serial port.
+    /// \brief find_header Searches a string of read data for a specific header, and trims any leading characters before the header.
+    /// \param header The header to search the data for.
+    /// \param data Data read from the serial port to search through.
+    /// \return TRUE if the header was found, otherwise FALSE.
     ///
-    void read_nmea();
+    bool find_header(const std::string& header, std::string& data);
     ///
-    /// \brief validate_nmea_checksum Validates the checksum of an NMEA sentence.
-    /// \param nmea The NMEA string to validate the checksum for.
-    /// \return TRUE if the checksum is valid, otherwise FALSE.
+    /// \brief spin_once Reads a single data line from the serial port and handles it.
+    /// \param id A control message ID to search for.
+    /// \return If the read data line is a control message matching the given ID, the method returns a pointer to the control message.
+    /// Otherwise, it returns a nullptr.
+    /// \details Use this method to search for control messages from the Venus GPS while still handling stream messages.
     ///
-    bool validate_nmea_checksum(const std::string& nmea);
+    message* spin_once(message::id_types id);
+
+    // CONFIGURATION METHODS
+    ///
+    /// \brief set_nmea_sentences Sets the enabled NMEA sentences to GGA and GSA.
+    /// \return TRUE if ACKed, FALSE if NAKed or no response.
+    ///
+    bool set_nmea_sentences();
+
+    // NMEA STREAM HANDLERS
+    ///
+    /// \brief handle_stream Parses and raises callbacks for stream messages.
+    /// \param stream The stream message to handle.
+    ///
+    void handle_stream(const std::string& stream);
     ///
     /// \brief parse_gga Parses a NMEA GGA sentence and stores data into m_current_data.
     /// \param nmea The NMEA string to parse.

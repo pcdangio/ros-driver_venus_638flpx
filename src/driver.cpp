@@ -1,267 +1,301 @@
 #include "driver.h"
 
+#include <stdexcept>
 #include <sstream>
-#include <unistd.h>
+#include <chrono>
 
-driver::driver()
+// CONSTRUCTORS
+driver::driver(std::string port, unsigned int baud)
 {
-    driver::m_serial_port = nullptr;
+    // Set up the serial port.
+    driver::m_serial_port = new serial::Serial(port, baud);
+
+    // Use an inter-byte timeout with a long full timeout.
+    // Streams will be coming in fast enough where we want readLines to timeout at the end of each CRLF.
+    serial::Timeout timeout(5, 100, 0, 100, 0);
+    driver::m_serial_port->setTimeout(timeout);
+
+    // Flush the input/output buffers.
+    driver::m_serial_port->flush();
 }
 driver::~driver()
 {
-    driver::deinitialize_serial();
+    // Close down and clean up serial port.
+    driver::m_serial_port->close();
+    delete driver::m_serial_port;
 }
 
-void driver::initialize(std::string port)
+// CONFIGURATION
+bool driver::set_baud(baud_rates baud)
 {
-    // Find and connect to the device.
-    unsigned int baud = driver::connect(port);
+    // Create CONFIG_SERIAL message.
+    driver::message msg(driver::message::id_types::CONFIG_SERIAL, 3);
+    // Set port number to COM 1.
+    msg.write_field<unsigned char>(0, 0x00);
+    // Set baud rate.
+    msg.write_field<unsigned char>(1, static_cast<unsigned char>(baud));
+    // Indicate to write to FLASH.
+    msg.write_field<unsigned char>(2, 0x01);
 
-    // Check if the baud rate needs to be changed (should be 115200).
-    if(baud != 115200)
+    // Send the message.
+    return driver::write_message(msg);
+}
+bool driver::set_power(bool power_on)
+{
+    // Create message to write.
+    driver::message msg(driver::message::id_types::CONFIG_POWER, 2);
+    // Set power field (1 is low power mode, 0 is regular power mode).
+    msg.write_field<bool>(0, !power_on);
+    // Write to SRAM, not FLASH.
+    msg.write_field<unsigned char>(1, 0x00);
+
+    // Send the message.
+    return driver::write_message(msg);
+}
+bool driver::set_update_rate(update_rates rate)
+{
+    // Check if baud rate is high enough.
+    unsigned int current_baud = driver::m_serial_port->getBaudrate();
+    if(rate == update_rates::hz_20 && current_baud < 115200)
     {
-        driver::message msg(driver::message::id_types::CONFIG_SERIAL, 3);
-        // Set COM1 to 115200 in FLASH (permanent).
-        msg.write_field<unsigned char>(1, 0x05);
-        msg.write_field<unsigned char>(2, 0x01);
-        driver::write_message(msg);
-        // Reconnect serial at new baud rate.
-        deinitialize_serial();
-        // Sleep to permit board's serial to reset.
-        usleep(500000);
-        unsigned int baud = driver::connect(port);
-        // Check that baud was successfully changed.
-        if(baud != 115200)
-        {
-            std::stringstream message;
-            message << "initialize: Baud rate did not change to 115200, still at " << baud << ".";
-            throw std::runtime_error(message.str());
-        }
+        std::stringstream error;
+        error << "set_update_rate: Must use baud rate of 115200bps for 20Hz rates.  Current baud is " << current_baud << "bps";
+        throw std::runtime_error(error.str());
+    }
+    else if(rate >= update_rates::hz_4 && current_baud < 38400)
+    {
+        std::stringstream error;
+        error << "set_update_rate: Must use baud rate of at least 38400bps for " << static_cast<unsigned int>(rate) << "Hz rates.  Current baud is " << current_baud << "bps";
+        throw std::runtime_error(error.str());
     }
 
-    // Set the NMEA messages.
-    driver::message nmea_msg(driver::message::id_types::CONFIG_NMEA, 8);
+    // Create message to write.
+    driver::message msg(driver::message::id_types::CONFIG_RATE, 2);
+    // Set rate field.
+    msg.write_field<unsigned char>(0, static_cast<unsigned char>(rate));
+    // Write to flash.
+    msg.write_field<unsigned char>(1, 0x01);
+
+    // Send the message.
+    return driver::write_message(msg);
+}
+bool driver::set_nmea_sentences()
+{
+    // Create message to write.
+    driver::message msg(driver::message::id_types::CONFIG_NMEA, 8);
     // Enable GGA and GSA.
-    nmea_msg.write_field<unsigned char>(0, 0x01);
-    nmea_msg.write_field<unsigned char>(1, 0x01);
+    msg.write_field<unsigned char>(0, 0x01);
+    msg.write_field<unsigned char>(1, 0x01);
     // Write to flash.
-    nmea_msg.write_field<unsigned char>(7, 0x01);
-    if(driver::write_message(nmea_msg) == false)
-    {
-        throw std::runtime_error("initialize: Could not configure NMEA messages.");
-    }
+    msg.write_field<unsigned char>(7, 0x01);
 
-    // Set the Position Rate.
-    driver::message rate_msg(driver::message::id_types::CONFIG_RATE, 2);
-    // Set 20Hz.
-    rate_msg.write_field<unsigned char>(0, 0x14);
-    // Write to flash.
-    rate_msg.write_field<unsigned char>(1, 0x01);
-    if(driver::write_message(rate_msg) == false)
-    {
-        throw std::runtime_error("initialize: Could not configure update rate.");
-    }
-}
-unsigned int driver::connect(std::string port)
-{
-    // Loop through known baud rates to check for a valid return.
-    // Use expected order to reduce search time.
-    // NOTE: Datasheet lists only these four bauds, but register map document shows 19200 and 57600 as well.
-    const unsigned int bauds[4] = {115200, 9600, 38400, 4800};
-
-    for(unsigned int b = 0; b < 4; b++)
-    {
-        // Initialize the serial connection.
-        driver::initialize_serial(port, bauds[b]);
-
-        // Flush the inputs.
-        driver::m_serial_port->flushInput();
-
-        // Attempt to set the power to normal mode and listen for ACK.
-        // Can use empty fields since 0x0000 = normal mode written to SRAM.
-        driver::message cmd(driver::message::id_types::CONFIG_POWER, 2);
-        bool ack = driver::write_message(cmd);
-        if(ack)
-        {
-            // Leave serial initialized and immediately return.
-            return bauds[b];
-        }
-        else
-        {
-            // Communication failed on this baud rate. Deinitialize serial and continue search.
-            driver::deinitialize_serial();
-        }
-    }
-
-    // If this point is reached, the device was not found at any baud rate.
-    std::stringstream message;
-    message << "find_device: Could not find device on port " << port << " at any of the expected baud rates.";
-    throw std::runtime_error(message.str());
+    // Send the message.
+    return driver::write_message(msg);
 }
 
-// SERIAL METHODS
-void driver::initialize_serial(std::string port, unsigned int baud)
-{
-    driver::m_serial_port = new serial::Serial(port, baud, serial::Timeout::simpleTimeout(50));
-}
-void driver::deinitialize_serial()
-{
-    if(driver::m_serial_port)
-    {
-        if(driver::m_serial_port->isOpen())
-        {
-            driver::m_serial_port->close();
-        }
-        delete driver::m_serial_port;
-        driver::m_serial_port = nullptr;
-    }
-}
-
+// CALLBACK ATTACHMENT
 void driver::set_data_callback(std::function<void (data)> callback)
 {
     driver::m_data_callback = callback;
 }
+
+// SPIN METHODS
 void driver::spin()
 {
-    driver::read_nmea();
-}
+    // Handles bulk reading and handling of stream messages.
+    // Control messages are ignored in this spin method.
 
-bool driver::write_message(const message &msg)
-{
-    driver::m_serial_port->write(msg.p_packet(), msg.p_packet_size());
-
-    // Receive ACK or NAK.
-    driver::message* ack_nak = driver::read_message();
-    if(ack_nak)
+    // Read one line at a time, otherwise serial port timeout returns partially completed lines.
+    while(driver::m_serial_port->available())
     {
-        // Verify it is an ACK message with a matching message ID.
-        bool ack =
-                ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK &&
-                static_cast<driver::message::id_types>(ack_nak->read_field<unsigned char>(0)) == msg.p_message_id();
-        delete ack_nak;
-        return ack;
+        std::string data = driver::m_serial_port->readline(256, "\r\n");
+
+        // Look for the NMEA stream header: $GP
+        if(driver::find_header("$GP", data))
+        {
+            // Header has been found and string is trimmed.
+            driver::handle_stream(data);
+        }
+    }
+}
+driver::message* driver::spin_once(message::id_types id)
+{
+    // Reads a single line from the serial buffer.
+    // Looks for a particular control message, while simultaneously handling streams.
+
+    // Read the next line from the port.
+    std::string data;
+    unsigned long data_size = driver::m_serial_port->readline(data, 256, "\r\n");
+
+    // Check if any data was read before interbyte timeout.
+    // Minimum size for a data packet, whether control or stream, is 7 bytes.
+    if(data_size < 7)
+    {
+        return nullptr;
+    }
+
+    // Determine if message is a control message.
+    // Find the 0xA0 and 0xA1 header.
+    char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
+    if(driver::find_header(std::string(header, 2), data))
+    {
+        // Control message found and data trimmed.
+        // Create control message structure.
+        driver::message* msg = new driver::message(data);
+
+        // Validate the message checksum.
+        if(msg->validate_checksum())
+        {
+            // Valid control message found.
+            // Check if it matches the requested message ID.
+            // If ID is ACK or NAK, find either ACK/NAK.
+            if(id == driver::message::id_types::RESPONSE_ACK || id == driver::message::id_types::RESPONSE_NAK)
+            {
+                if(msg->p_message_id() == driver::message::id_types::RESPONSE_ACK || msg->p_message_id() == driver::message::id_types::RESPONSE_NAK);
+                {
+                    // Valid requested ack/nak found.
+                    return msg;
+                }
+            }
+            // Otherwise, find the requested ID.
+            else if(msg->p_message_id() == id)
+            {
+                // Valid requested message found.
+                return msg;
+            }
+        }
+
+        // If this point reached, checksum is invalid or doesn't match requested ID.
+        delete msg;
+        return nullptr;
+    }
+
+    // If this point reached, data is not a control message.
+    // Determine if message is a stream message.
+    if(driver::find_header("$GP", data))
+    {
+        // Stream message found and stream trimmed.
+        driver::handle_stream(data);
+    }
+
+    // If this point reached, no control message has been found.
+    return nullptr;
+}
+bool driver::find_header(const std::string &header, std::string &data)
+{
+    unsigned long start_index = data.find(header);
+    // Check if header has been found.
+    if(start_index != std::string::npos)
+    {
+        // Header has been found.
+        // Trim anything before the header.
+        data.erase(0, start_index);
+
+        return true;
     }
     else
     {
-        // Timed out.
         return false;
     }
 }
 
-driver::message* driver::read_message()
+// IO METHODS
+bool driver::write_message(const message &msg)
 {
-    // Keep reading strings until the first control message is found or times out.
-    // This will always ignore and throw away $ stream messages since control messages are vital.
-    while(true)
+    // Write the message.
+    driver::m_serial_port->write(msg.p_packet(), msg.p_packet_size());
+
+    // Read ACK/NAKs until either timeout or matching ID found.
+    bool loop = true;
+    bool ack = false;
+    while(loop)
     {
-        std::string data = driver::m_serial_port->readline(128, "\r\n");
-
-        // Check if timeout.
-        if(data.size() == 0)
+        driver::message* ack_nak = driver::read_message(driver::message::id_types::RESPONSE_ACK);
+        if(ack_nak)
         {
-            return nullptr;
-        }
-
-        // Find the 0xA0 and 0xA1 header.
-        char header[2] = {static_cast<char>(0xA0), static_cast<char>(0xA1)};
-        unsigned long start_index = data.find(header, 0, 2);
-
-        if(start_index != std::string::npos)
-        {
-            // Header found.
-            // Trim out any leading characters.
-            data.erase(0, start_index);
-
-            // Check message length is at least 7 bytes.  Header (2), Payload Length (2), Checksum (1), CRLF (2)
-            if(data.size() < 7)
+            // Compare IDs.
+            if(ack_nak->read_field<unsigned char>(0) == static_cast<unsigned char>(msg.p_message_id()))
             {
-                return nullptr;
+                // ACK/NAKed message ID matches sent ID.
+                // Check if ACK or NAK.
+                ack = ack_nak->p_message_id() == driver::message::id_types::RESPONSE_ACK;
+                // ACK/NAK found. Break loop.
+                loop = false;
             }
 
-            // Create an output message.
-            driver::message* msg = new driver::message(data);
-
-            // Validate the checksum.
-            if(msg->validate_checksum() == false)
-            {
-                delete msg;
-                return nullptr;
-            }
-
-            // Check if blank ACK/NAK message.
-            if(msg->p_message_id() == driver::message::id_types::RESPONSE_ACK || msg->p_message_id() == driver::message::id_types::RESPONSE_NAK)
-            {
-                if(msg->read_field<unsigned char>(0) == 0x00)
-                {
-                    delete msg;
-                    return nullptr;
-                }
-            }
-
-            // If this point is reached, a valid message has been received.
-            return msg;
-        }
-    }
-}
-void driver::read_nmea()
-{
-    // Attempt to read all nmea strings until timeout.
-    std::vector<std::string> nmea = driver::m_serial_port->readlines(1024, "\r\n");
-
-    // Iterate over read messages.
-    for(unsigned int i = 0; i < nmea.size(); i++)
-    {
-        // Trim any leading bytes not equal to the header, $GP
-        unsigned long start_index = nmea.at(i).find("$GP");
-        if(start_index != std::string::npos)
-        {
-            // Trim the beginning of the string.
-            nmea[i].erase(0, start_index);
+            // Clean up non-null ack_nak.
+            delete ack_nak;
         }
         else
         {
-            // Header not found.
-            continue;
+            // read_message timed out. Break loop.
+            loop = false;
         }
-
-        // Validate the message's checksum.
-        if(driver::validate_nmea_checksum(nmea.at(i)))
-        {
-            // Determine the message type.
-            std::string message_type = nmea.at(i).substr(3, 3);
-            if(message_type.compare("GGA") == 0)
-            {
-                driver::parse_gga(nmea.at(i));
-            }
-            else if(message_type.compare("GSA") == 0)
-            {
-                driver::parse_gsa(nmea.at(i));
-
-                // This is the last message containing needed data.
-                // Raise the data ready callback and pass in the current data.
-                if(driver::m_data_callback)
-                {
-                    driver::m_data_callback(driver::m_current_data);
-                }
-            }
-        }
-        // If checksum mismatch, don't do anything with the message and just continue.
     }
+
+    return ack;
 }
-bool driver::validate_nmea_checksum(const std::string &nmea)
+driver::message* driver::read_message(message::id_types id)
 {
-    unsigned char expected_checksum = 0;
-    for(unsigned int i = 1; i < nmea.length() - 5; i++)
+    // Create timestamp for tracking spin_once attempts.
+    std::chrono::high_resolution_clock::time_point start_time = std::chrono::high_resolution_clock::now();
+
+    // Continuously spin one message at a time until message found or timeout.
+    driver::message* msg = nullptr;
+    while(!msg)
     {
-        expected_checksum ^= nmea.at(i);
+        msg = driver::spin_once(id);
+        // Check timeout.
+        long elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start_time).count();
+        if(elapsed > 100)
+        {
+            break;
+        }
+    }
+
+    return msg;
+}
+
+// STREAM MANAGEMENT
+void driver::handle_stream(const std::string &stream)
+{
+    // Validate the checksum.
+    unsigned char expected_checksum = 0;
+    for(unsigned int i = 1; i < stream.length() - 5; i++)
+    {
+        expected_checksum ^= stream.at(i);
     }
     // Convert packet's hex chars to an actual hex value using streams.
     std::stringstream checksum_stream;
-    checksum_stream << nmea.substr(nmea.length() - 4, 2);
+    checksum_stream << stream.substr(stream.length() - 4, 2);
     unsigned short actual_checksum;
     checksum_stream >> std::hex >> actual_checksum;
     // Compare checksums.
-    return actual_checksum == static_cast<unsigned short>(expected_checksum);
+    if(actual_checksum != static_cast<unsigned short>(expected_checksum))
+    {
+        return;
+    }
+
+    // If this point reached, the checksum is valid.
+
+    // Determine the message type.
+    std::string message_type = stream.substr(3, 3);
+    if(message_type.compare("GGA") == 0)
+    {
+        // Parse the GGA message to update the data structure.
+        driver::parse_gga(stream);
+
+        // Raise callbacks.
+        if(driver::m_data_callback)
+        {
+            driver::m_data_callback(driver::m_current_data);
+        }
+    }
+    else if(message_type.compare("GSA") == 0)
+    {
+        // Parse the GSA message to update the data structure.
+        driver::parse_gsa(stream);
+    }
 }
 void driver::parse_gga(const std::string &nmea)
 {
@@ -365,7 +399,12 @@ void driver::parse_gsa(const std::string &nmea)
     driver::m_current_data.vdop = std::stof(field);
 }
 
+
+
+
 // MESSAGE
+
+// CONSTRUCTORS
 driver::message::message(id_types message_id, unsigned int data_size)
 {
     // Create an packet with empty data bytes.
@@ -413,6 +452,7 @@ driver::message::~message()
     delete [] driver::message::m_packet;
 }
 
+// WRITE FIELD
 template<typename T>
 void driver::message::write_field(unsigned int address, T field)
 {
@@ -427,7 +467,7 @@ template void driver::message::write_field<unsigned int>(unsigned int address, u
 template void driver::message::write_field<int>(unsigned int address, int field);
 template void driver::message::write_field<float>(unsigned int address, float field);
 template void driver::message::write_field<double>(unsigned int address, double field);
-
+// Primary method.
 void driver::message::write_field(unsigned int address, unsigned int size, void *field)
 {
     // Address is 0 based in the data portion of the packet.
@@ -477,6 +517,7 @@ void driver::message::write_field(unsigned int address, unsigned int size, void 
     driver::message::write_checksum();
 }
 
+// READ FIELD
 template<typename T>
 T driver::message::read_field(unsigned int address) const
 {
@@ -493,7 +534,7 @@ template unsigned int driver::message::read_field<unsigned int>(unsigned int add
 template int driver::message::read_field<int>(unsigned int address) const;
 template float driver::message::read_field<float>(unsigned int address) const;
 template double driver::message::read_field<double>(unsigned int address) const;
-
+// Primary method.
 void driver::message::read_field(unsigned int address, unsigned int size, void *field) const
 {
     // Address is 0 based in the data portion of the packet.
@@ -547,6 +588,7 @@ void driver::message::read_field(unsigned int address, unsigned int size, void *
     }
 }
 
+// CHECKSUM
 unsigned char driver::message::calculate_checksum() const
 {
     unsigned char checksum = 0;
@@ -565,6 +607,7 @@ bool driver::message::validate_checksum() const
     return driver::message::calculate_checksum() == driver::message::m_packet[driver::message::m_packet_size - 3];
 }
 
+// PROPERTIES
 unsigned int driver::message::p_packet_size() const
 {
     return driver::message::m_packet_size;
