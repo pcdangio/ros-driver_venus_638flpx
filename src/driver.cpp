@@ -285,18 +285,19 @@ void driver::handle_stream(const std::string &stream)
     std::string message_type = stream.substr(3, 3);
     if(message_type.compare("GGA") == 0)
     {
+        // Parse the GGA message to update the data structure.
         driver::parse_gga(stream);
-    }
-    else if(message_type.compare("GSA") == 0)
-    {
-        driver::parse_gsa(stream);
 
-        // This is the last message containing needed data.
-        // Raise the data ready callback and pass in the current data.
+        // Raise callbacks.
         if(driver::m_data_callback)
         {
             driver::m_data_callback(driver::m_current_data);
         }
+    }
+    else if(message_type.compare("GSA") == 0)
+    {
+        // Parse the GSA message to update the data structure.
+        driver::parse_gsa(stream);
     }
 }
 void driver::parse_gga(const std::string &nmea)
